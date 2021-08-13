@@ -1,5 +1,88 @@
-
 --region Unused
+
+-- quick test
+-- local af = {
+--     info = mp.get_property_native('option-info/af', false)
+-- }
+-- if af.info then
+--     msg.info('af (Audio Filter) object info:\n'
+--                 .. utils.format_json(af.info)
+--                 .. '\n' .. utils.format_json(af.info.choices) )
+-- end
+
+--region build_completers - Unused Partial Implementations
+
+-- (Unused atm)
+-- @ param  content string
+-- @ return         string
+--- function bracketed(content)
+---    if type(content) == "string" then
+---        return
+---    else
+---        return
+---    end
+--- end
+
+---
+--- Build a token pattern with additional character classes. Use of `]` and
+--- `^` should be escaped (`%]`)
+---
+-- @ param  chars string
+-- @ return       string
+--- -- local function token_with(chars)
+--- --     if type(chars) ~= "string" then
+--- --         return token
+--- --     else
+--- --         return '[' .. token_char_base .. chars .. ']*'
+--- --     end
+--- -- end
+---
+--- ---
+--- --- Build a completion description table, and optionally immediately append
+--- --- to the result table instead of returning if `target` table passed.
+--- ---
+--- -- @ overload fun(pattern: string, list: CompletionList, append: string, target: CompletionList)
+--- -- @ overload fun(pattern: CompletionCompArgTable): CompletionSet
+--- -- @ overload fun(pattern: CompletionCompArgTableTargeted)
+--- -- @ param  pattern string
+--- -- @ param  list    CompletionList
+--- -- @ param  append  string | nil
+--- -- @ return         CompletionSet
+--- local function prop_comp(pattern, list, append)
+---     -- Handle alternate syntax (prop_comp{pattern = ...})
+---     if type(pattern) == "table"
+---         and pattern.list
+---         and pattern.append
+---         and pattern.pattern
+---     then
+---         -- [typesystem incantations]
+---         -- @ type CompletionCompArgTable | CompletionCompArgTableTargeted
+---         local pattern = pattern
+---
+---         list   = pattern.list
+---         append = pattern.append
+---         target = type(pattern.target) and pattern.target or nil
+---         -- Have to do this last to avoid wiping other values
+---         pattern = pattern.pattern
+---     end
+---
+---     -- @ type CompletionSet
+---     local comp =
+---     {
+---         pattern = pattern,
+---         list    = list,
+---         append  = append
+---     }
+---
+---     if type(target) == "table" then
+---         target[#target + 1] = comp
+---         return
+---     else
+---         return comp
+---     end
+--- end
+
+--endregion build_completers - Unused Partial Implementations
 
 -- set_osd_ass test
 -- test_repl_active   = false
@@ -250,7 +333,6 @@
 --     mp.command( 'script-message type "script-message test_set \\"'
 --                 .. ass_test_text_def:gsub([[\]], '\\\\') .. '\\""')
 -- end
-
 
 -- msg.info([[Drawing with set_osd_ass...]])
 -- mp.register_script_message('test',     ass_test_handle)

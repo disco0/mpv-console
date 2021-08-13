@@ -1,5 +1,12 @@
 local M = { }
 
+--region Localize
+
+local format = string.format
+local rep    = string.rep
+
+--endregion Localize
+
 --region Declarations
 
 ---@alias ColorLiteralArray table<number | '1' | '2' | '3', string>
@@ -17,13 +24,14 @@ local M = { }
 
 local hex_pattern =
 {
-    [0xF]  = string.format('^%s$', string.rep('%x', 1)),
-    [0xFF] = string.format('^%s$', string.rep('%x', 2)),
-    [0xFFF] = string.format('^%s$', string.rep('%x', 3)),
-    [0xFFFF] = string.format('^%s$', string.rep('%x', 4))
+    [0x000F] = format('^%s$', rep('%x', 1)),
+    [0x00FF] = format('^%s$', rep('%x', 2)),
+    [0x0FFF] = format('^%s$', rep('%x', 3)),
+    [0xFFFF] = format('^%s$', rep('%x', 4))
 }
 
 for k, v in ipairs(hex_pattern) do print(k, v) end
+
 ---
 --- Returns if first char of string `char` is a hexadecimal digit, or `false`
 --- by defauly if `char` is zero-length string or non-string value.
@@ -61,11 +69,30 @@ end
 ---@param  color_literal ColorLiteralArray
 ---@return               string
 function rgb_list_fg(color_literal)
-    if type(color_literal) ~= "twable" then
+    if type(color_literal) ~= "table" then
         error('Argument passed to FG is not a table.')
     end
-    if #color_literal ~= 3 then
-        error('Table passed to rgb_list_fg is not length of 3.')
+
+    if #color_literal < 3 then
+        error('Argument passed is less than three characters long.')
+
+    -- If short form
+    elseif #color_literal <= 4 then
+        if #color_literal == 3 then
+
+        else -- #color_literal == 4
+
+        end
+    -- If possibly full form
+    elseif #color_literal <= 8 then
+    else
+        if #color_literal == 8 then
+
+        elseif #color_literal == 6 then
+
+        else
+            error('Table passed to rgb_list_fg is not length of 3.')
+        end
     end
 
     ---@type string, string, string

@@ -377,6 +377,9 @@ _G.opts =
     --- Set the font size used for the Console and the console. This will be
     --- multiplied by "scale."
     font_size = 16,
+
+    -- Display total history entries/position in history in prompt prefix
+    prompt_hist_pos = true,
 }
 
 -- Apply user-set options
@@ -555,8 +558,10 @@ function _G.log_add_advanced(entry, wait)
     if wait == true
     then
         -- no-redraw
-    elseif _G.console_active then
-        if not _G.update_timer:is_enabled() then
+    elseif _G.console_active
+    then
+        if not _G.update_timer:is_enabled()
+        then
             _G.update()
             _G.update_timer:resume()
         else
@@ -573,7 +578,7 @@ local LOG_FRAGMENT =
 
 --- Empty the log buffer of all messages (`Ctrl+l`)
 local function clear_log_buffer()
-    log_buffer = {}
+    _G.log_buffer = {}
     _G.update()
 end
 
@@ -636,14 +641,15 @@ function _G.update()
 
     local dpi_scale = mp.get_property_native("display-hidpi-scale", 1.0)
 
-    dpi_scale = dpi_scale * opts.scale
+    dpi_scale = dpi_scale * _G.opts.scale
 
     local screenx, screeny, aspect = mp.get_osd_size()
     screenx = screenx / dpi_scale
     screeny = screeny / dpi_scale
 
     -- Clear the OSD if the Console is not active
-    if not _G.console_active then
+    if not console_active
+    then
         mp.set_osd_ass(screenx, screeny, '')
         return
     end
@@ -661,19 +667,20 @@ function _G.update()
     -- of the drawing. So the cursor doesn't affect layout too much, make it as
     -- thin as possible and make it appear to be 1px wide by giving it 0.5px
     -- horizontal borders.
-    local cheight = opts.font_size * 8
-    local cglyph = format(
+    local cursor_height = opts.font_size * 8
+    local cursor_glyph = format(
         '{\\r\\1a&H44&\\3a&H44&\\4a&H99&\\1c&H%s&\\3c&Heeeeee&\\4c&H000000&\\xbord0.5\\ybord0\\xshad0\\yshad1\\p4\\pbo24}m 0 0 l 1 0 l 1 %s l 0 %s{\\p0}',
         'EEEEEE',
-        cheight,
-        cheight
+        cursor_height,
+        cursor_height
     )
-    local before_cur = ass_escape(_G.line:sub(1, _G.cursor - 1))
+    local before_cur = ass_escape(_G.line:sub(1, cursor - 1))
     local after_cur  = ass_escape(_G.line:sub(_G.cursor))
 
     -- Render log messages as ASS. This will render at most screeny / font_size messages.
     local log_ass = ''
-    local log_messages = math.min(#log_buffer, math.ceil(screeny, opts.font_size))
+    -- @NOTE: math.ceil only takes one arg?
+    local viewable_log_message_count = math.min(#_G.log_buffer, math.ceil(screeny, _G.opts.font_size))
 
     -- @TODO: Inline function calls if affecting speed
     -- @TODO: Return escaped string to position in line/node buffer and allow the now semi-memoized
@@ -693,7 +700,7 @@ function _G.update()
         -- log_ass = table.concat({log_ass, style, node.style, ass_escape(node.text)}, '')
     end
 
-    for i = #log_buffer - log_messages + 1, #log_buffer
+    for i = #log_buffer - viewable_log_message_count + 1, #log_buffer
     do
         -- Initial plan was going to be determining basic and extended buffer by checking for
         -- text/style table values, followed by an index value and a fallthrough (error) case,
@@ -733,20 +740,31 @@ function _G.update()
     ass:new_event()
     ass:an(1)
     ass:pos(2, screeny - 2 - global_margin_y * screeny)
-    -- ass:append(log_ass .. '\\N')
     ass:append(log_ass .. ASS_CHAR.NEW_LINE)
-    ass:append(style .. '> ' .. before_cur)
-    ass:append(cglyph)
-    ass:append(style .. after_cur)
+
+    -- Just content after initial style content of each section–still requires prepending style,
+    -- or style + alpha for cursor pass
+    -- @NOTE: Special case for drawing history position—if position is one over the history
+    --        entry total, assume its the active input buffer, and don't draw.
+    local prompt_before_body = style .. '> ' .. before_cur
+    if _G.opts.prompt_hist_pos == true and (_G.history_pos ~= #_G.history_orig + 1)
+    then
+        prompt_before_body = format('[%s/%s] > %s', #_G.history_orig, math.max(0, _G.history_pos), before_cur)
+    end
+    local prompt_after_body = after_cur
+
+    ass:append(style .. prompt_before_body)
+    ass:append(cursor_glyph)
+    ass:append(style .. prompt_after_body)
 
     -- Redraw the cursor with the REPL text invisible. This will make the
     -- cursor appear in front of the text.
     ass:new_event()
     ass:an(1)
     ass:pos(2, screeny - 2 - global_margin_y * screeny)
-    ass:append(style .. '{\\alpha&HFF&}> ' .. before_cur)
-    ass:append(cglyph)
-    ass:append(style .. '{\\alpha&HFF&}' .. after_cur)
+    ass:append(style .. '{\\alpha&HFF&}' .. prompt_before_body)
+    ass:append(cursor_glyph)
+    ass:append(style .. '{\\alpha&HFF&}' .. prompt_after_body)
 
     mp.set_osd_ass(screenx, screeny, ass.text)
 end
@@ -781,7 +799,8 @@ local log = msg.extend('show_and_type')
 local function show_and_type(text, eval_immediately)
     text = type(text) == 'string' and text or ''
 
-    if type(eval_immediately) ~= "boolean" then
+    if type(eval_immediately) ~= "boolean"
+    then
         eval_immediately = false
     end
 
@@ -960,7 +979,8 @@ local function help_command_custom(param)
     local output = ''
 
     -- Output Cases:
-    if not param or param == '' then
+    if not param or param == ''
+    then
         -- Case 1: Print Available Commands
         --   Modifications:
         --     - Print out commands with log style `cmd_style`
@@ -976,7 +996,8 @@ local function help_command_custom(param)
         local max_cmd_chars = -1
 
         -- Command list iteration 1
-        for _, cmd in ipairs(cmdlist) do
+        for _, cmd in ipairs(cmdlist)
+        do
             output = output  .. '  ' .. cmd.name
         end
         output = string.format('%s%s%s%s',
