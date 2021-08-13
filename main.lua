@@ -749,7 +749,14 @@ function _G.update()
     local prompt_before_body = style .. '> ' .. before_cur
     if _G.opts.prompt_hist_pos == true and (_G.history_pos ~= #_G.history_orig + 1)
     then
-        prompt_before_body = format('[%s/%s] > %s', #_G.history_orig, math.max(0, _G.history_pos), before_cur)
+        local hist_len = #_G.history_orig
+        local pad_num = tostring(tostring(hist_len):len())
+        prompt_before_body = format(
+            '[%s/%s] > %s',
+            tostring(math.max(0, _G.history_pos)):pad_left(pad_num, '0'),
+            tostring(#_G.history_orig):pad_left(pad_num, '0'),
+            before_cur
+        )
     end
     local prompt_after_body = after_cur
 
