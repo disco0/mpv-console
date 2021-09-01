@@ -29,7 +29,7 @@ mp.msg.info('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~')
 
 mpv Package Path Patcher
 
-@version 1.0.0
+@version 2.0.0
 
 @description Extends and normalizes package path for mpv scripts.
 
@@ -41,14 +41,16 @@ loaded as a directory will
 ```
 loading file /Users/disk0/.config/mpv/scripts/<script>.lua
 [package.path] Initial package.path:
-    /usr/local/Cellar/luajit-openresty/20210510/share/luajit-2.1.0-beta3/?.lua
-    /usr/local/share/lua/5.1/?.lua
-    /usr/local/share/lua/5.1/?/init.lua
-    /usr/local/Cellar/luajit-openresty/20210510/share/lua/5.1/?.lua
-    /usr/local/Cellar/luajit-openresty/20210510/share/lua/5.1/?/init.lua
+  /usr/local/Cellar/luajit-openresty/20210510/share/luajit-2.1.0-beta3/?.lua
+  /usr/local/share/lua/5.1/?.lua
+  /usr/local/share/lua/5.1/?/init.lua
+  /usr/local/Cellar/luajit-openresty/20210510/share/lua/5.1/?.lua
+  /usr/local/Cellar/luajit-openresty/20210510/share/lua/5.1/?/init.lua
 [package.path] Updated package.path:
-  /Users/disk0/.config/mpv/scripts/?.lua
-  /Users/disk0/.config/mpv/scripts/console/?.lua
+  /Users/<user>/.config/mpv/scripts/console/?.lua
+  /Users/<user>/.config/mpv/scripts/console/?/init.lua
+  /Users/<user>/.config/mpv/scripts/?.lua
+  /Users/<user>/.config/mpv/scripts/?/init.lua
   /usr/local/Cellar/luajit-openresty/20210510/share/luajit-2.1.0-beta3/?.lua
   /usr/local/share/lua/5.1/?.lua
   /usr/local/share/lua/5.1/?/init.lua
@@ -58,22 +60,45 @@ loading file /Users/disk0/.config/mpv/scripts/<script>.lua
 
 ]]--
 
---region Configuration
+local package_path_patch = { }
+
+--region expand-path
 
 ---
---- Array of additional subdirectories (in mpv scripts directory) that will be appended after
---- default additions.
+--- Wrapper for expand-path command
 ---
---- @TODO: Actually make it do this
----
-local additional_subdirectories =
-{
-    "utils"
-}
+---@param path string
+---@return string expanded_path
+local function expand_path(path)
+    -- TODO: Properly handle metatable resolved string content?
+    assert((type(path) == 'string' and #path > 0),
+        '`path` parameter is a string of non-zero length.')
 
---endregion Configuration
+    return mp.command_native({'expand-path', path}, nil)
+end
 
--- (Pulled out of do loop for completing script paths for load-script)
+--endregion expand-path
+
+--region package.path Pretty Print
+
+--- Get package.path paths, separated and indented on lines
+---@param indent? string
+local function format_package_path(indent, paths_array)
+    local indent = indent or "  "
+
+    -- Handle custom list of paths
+    if type(paths_array) == 'table' and #paths_array > 0
+    then
+        return "\n" .. indent .. table.concat(paths_array, "\n" .. indent)
+    else
+        return package.path:gsub(';', "\n" .. indent)
+                           :gsub('^', indent)
+    end
+end
+
+--endregion package.path Pretty Print
+
+--region get_mpv_config_dir
 
 --- Resolves user mpv config path, checking the following environment variables (in order):
 ---
@@ -83,177 +108,263 @@ local additional_subdirectories =
 ---
 --- `HOME`: `$HOME/.config/mpv/`
 ---
----@param  no_cache boolean | nil
----@return          string  | nil
-local get_mpv_config_dir
+local get_mpv_config_dir = function() return expand_path('~~/') end
 
-do
+--[[ -- Overthinking this, restore if this is really used that much/is actually slow
+    ---
+    --- `MPV_HOME`: `$MPV_HOME/`
+    ---
+    --- `XDG_CONFIG_HOME`: `$XDG_CONFIG_HOME/mpv/`
+    ---
+    --- `HOME`: `$HOME/.config/mpv/`
+    ---
+    (function()
+        ---@type string
+        local resolved_mpv_config_dir = nil
 
-    ---@type string
-    local resolved_mpv_config_base = nil
-    get_mpv_config_dir = function (no_cache)
-        if type(resolved_mpv_config_base) == "string" and #resolved_mpv_config_base > 0
-        then
-            return resolved_mpv_config_base
-        else
-            local env_fmt_lut =
-            {
-                { 'MPV_HOME',        '%s'             },
-                { 'XDG_CONFIG_HOME', '%s/mpv'         },
-                { 'HOME',            '%s/.config/mpv' }
-            }
-            ---@type string
-            local value = nil
-
-            for _, env_map in ipairs(env_fmt_lut) do
-                value = os.getenv(env_map[1])
-                if type(value) == 'string' and #value > 0 then
-                    resolved_mpv_config_base = string.format(env_map[2], value)
-                    return resolved_mpv_config_base
-                end
+        --- @param  no_cache boolean | nil
+        --- @return          string  | nil
+        return function(no_cache)
+            if type(resolved_mpv_config_dir) == "string" and #resolved_mpv_config_dir > 0
+            then
+                return resolved_mpv_config_dir
+            else
+                resolved_mpv_config_dir = expand_path(mpv_config_dir_short)
+                if resolved_mpv_config_dir then return resolved_mpv_config_dir end
             end
         end
-    end
+    end)()
+]]--
+
+--endregion get_mpv_config_dir
+
+--region Configuration
+
+package_path_patch.options =
+{
+    enabled = true,
 
     ---
-    --- Get full path of mpv script using native lua introspection becuase there's no way to do it
-    --- via scripting API (or I've failed to find it, leaning on the latter)
+    --- Completely disable debug messages, or allow them through (at appropiate log levels).
     ---
-    local function script_path_rawget()
-        local info = require('debug').getinfo(1, 'S')
-
-        return info.source or [[<UNKNOWN PATH>]]
-    end
+    debug_logging = false,
 
     ---
-    --- Debug log for package.path patching block
-    ---@param  msg string
-    ---@vararg     any
-    ---@return     nil
-    local function log(msg, ...)
-        if not msg or #msg == 0 then mp.msg.debug('[package.path]') return end
-
-        mp.msg.debug('[package.path] ' .. string.format(msg, ...))
-    end
-
+    --- Array of additional subdirectories (in mpv scripts directory) that will be appended after
+    --- default additions.
     ---
-    --- Split string containing semicolon delimited paths into array
-    ---@param  package_path string | nil
-    ---@return              string[]
-    local function get_package_paths(package_path)
-        -- Default to relevant target if alternative not provided
-        if type(package_path) ~= 'string' or #package_path < 1 then
-            package_path = package.path
-        end
+    --- @TODO: Actually make it do this—atm I'd prefer to reference ~~/scripts/lib via lib.* tho
+    ---
+    additional_subdirectories =
+    {
+        -- ~~/scripts/lib
+        "lib"
+    }
+}
 
-        if type(package_path) ~= 'string' or #package_path < 1 then
-            error(string.format(
-                '[get_package_paths] package.path or package_path parameter is not a string, or is empty (value: %s = "%s"',
-                    type(package_path),
-                    tostring(package_path)
-            ))
-        end
+--endregion Configuration
 
-        ---@type string[]
-        local paths = { }
+--region Patching
 
-        do
-            ---@param  first string
-            ---@return       nil
-            local function add_path_match(first) table.insert(paths, first) end
-
-            package_path:gsub( "([^;]+)([;]?)", add_path_match )
-        end
-
-        return paths
-    end
-
-    local function package_path_fix()
-
-        log('Initial package.path:%s',
-            package.path:gsub(';', "\n  "):gsub('^', "\n  ") )
-
-        ---@type string[]
-        local package_paths = get_package_paths()
-
-        local mpv_script_dir  = get_mpv_config_dir()
-        local script_name     = mp.get_script_name()
-        local raw_script_path = script_path_rawget() or ''
-        -- Used later to check if script is file/directory based
-        local raw_script_dir  = raw_script_path:gsub('[/\\]?[^/\\]+%.lua$', '')
-
-        if not(type(mpv_script_dir) == "string" and #mpv_script_dir > 0)
-        then
-            mp.msg.warn(string.format(
-                '[package.path] Failed to resolve mpv configuration path: (mpv_base?: %s => %s)',
-                type(mpv_script_dir),
-                tostring(mpv_script_dir)
-            ))
-            return
-        end
-
-        local mpv_script_path = mpv_script_dir .. "/scripts/"
-        local paths           = mpv_script_path .. '?.lua;'
-
-        -- Check if script directory based and append base mpv script directory _after_ script's
-        -- own directory (expected to be first path in package.path)
-        ---@type number
-        local script_dir_path_index = -1
-        -- Check if raw script path is <script-name>/{<script-name>,main}.lua
-        if  raw_script_path:find(script_name .. '/' .. script_name .. '.lua') or
-            raw_script_path:find(script_name .. '/main.lua')
-        then
-            -- Find index of script's directory
-            paths = mpv_script_path .. script_name .. '/?.lua;' .. paths
-
-        end
-
-        _G.package.path =
-            -- ~~/scripts/?.lua
-            -- [~~/scripts/<script-dir>/?.lua]
-            paths ..
-            -- Initial package.path
-            _G.package.path
-
-        log('Updated package.path:%s',
+(function()
+    if package_path_patch.options.enabled ~= true
+    then
+        mp.msg.trace(string.format(
+            'Skipped package.path patch, keeping default:%s',
             -- Split on separator and indent each path
-            package.path:gsub(';', "\n  "):gsub('^', "\n  ") )
+            package.path:gsub(';', "\n  "):gsub('^', "\n  ")))
 
         return
     end
 
-    package_path_fix()
-end
+    do
+        --region Environment
+
+        ---@return table<number, any>
+        ---@see    tablelib.pack
+        local pack   = _G.pack or table.pack or function(...) return {n = select('#', ...), ...} end
+
+        --endregion Environment
+
+        ---
+        --- Get full path of mpv script using native lua introspection becuase there's no way to do it
+        --- via scripting API (or I've failed to find it, leaning on the latter)
+        ---
+        local function script_path_rawget()
+            return require('debug').getinfo(1, 'S').source
+                or [[<UNKNOWN PATH>]]
+        end
+
+        ---
+        --- Debug log for package.path patching block
+        ---@param  msg string
+        ---@vararg     any
+        ---@return     nil
+        local function dbg_log(msg, ...)
+            mp.msg.debug(
+                (#msg > 0
+                    and '[package.path] ' .. string.format(msg, ...))
+                    or '[package.path]')
+        end
+
+        if not package_path_patch.options.debug_logging
+        then
+            dbg_log = function() end
+        end
+
+        ---
+        --- Split string containing semicolon delimited paths into array
+        ---
+        ---@param  package_path string | nil
+        ---@return              string[]
+        local function get_package_paths(package_path)
+
+            --region Resolve Parameters
+
+            -- Default to relevant target if alternative not provided
+            if type(package_path) ~= 'string' or #package_path < 1
+            then
+                package_path = package.path
+            end
+
+            if type(package_path) ~= 'string' or #package_path < 1
+            then
+                error(string.format(
+                    '[get_package_paths] package.path or package_path parameter is not a string, or is empty (value: %s = "%s")',
+                        type(package_path),
+                        tostring(package_path)
+                ))
+            end
+
+            --endregion Resolve Parameters
+
+            ---@type string[]
+            local paths = { }
+
+            ---@param  first string
+            ---@return       nil
+            local function add_path_match(first) table.insert(paths, first) end
+
+            package_path:gsub("([^;]+)([;]?)", add_path_match)
+
+            return paths
+        end
+
+        -- local function package_path_fix()
+        (function()
+
+            dbg_log('Initial package.path:\n%s', format_package_path())
+
+            ---
+            --- Stores working state of package.path (split into path list), and combined at end.
+            ---
+            ---@type string[]
+            local package_paths = get_package_paths()
+
+            local mpv_config_dir = (get_mpv_config_dir() or ''):gsub([[\+$]], '')
+            if #mpv_config_dir == 0
+            then
+                mp.msg.warn(string.format(
+                    '[package.path] Failed to resolve mpv configuration path: (mpv_base?: %s => %s)',
+                    type(mpv_config_dir),
+                    tostring(mpv_config_dir)
+                ))
+
+                return
+            end
+
+            local script_name     = mp.get_script_name()
+            local raw_script_path = script_path_rawget() or ''
+
+            local mpv_scripts_dir = mpv_config_dir  .. "/scripts"
+            local function to_script_dir_path(...)
+                return table.concat(pack(mpv_scripts_dir, ... ), '/')
+            end
+
+            --region Case: Script Directory
+
+            -- Check if raw script path is <script-name>/{<script-name>,main}.lua
+            local script_dir_find_patterns  =
+            {
+                script_name .. '/' .. script_name .. '.lua',
+                script_name .. '/main.lua'
+            }
+
+            if  raw_script_path:find(script_dir_find_patterns[1]) or
+                raw_script_path:find(script_dir_find_patterns[2])
+            then
+                dbg_log('Detected directory based script.')
+
+                -- Require path patterns to add at top
+                local script_dir_require_patterns =
+                {
+                    -- Script dir
+                    to_script_dir_path(script_name, '?.lua'),
+                    to_script_dir_path(script_name, '?', 'init.lua'),
+                    -- Scripts dir
+                    to_script_dir_path('?.lua'),
+                    to_script_dir_path('?', 'init.lua'),
+                }
+
+                -- Insert above path patterns at beginning of package.path
+                -- @NOTE: Will break if paths need to be inserted anywhere else)
+                for i, path in ipairs(script_dir_require_patterns)
+                do
+                    table.insert(package_paths, i, path)
+                end
+            end
+
+            --endregion Case: Script Directory
+
+            --region Dedupe
+
+            local deduped = { }
+            local seen = { }
+            for i, path in ipairs(package_paths)
+            do
+                if seen[path] == nil
+                then
+                    seen[path] = true
+                    table.insert(deduped, path)
+                end
+            end
+            package_paths = deduped
+
+            --endregion Dedupe
+
+            _G.package.path = table.concat(package_paths, ';')
+
+            dbg_log('Updated package.path:\n%s', format_package_path())
+
+            return
+        end)()
+    end
+end)()
+
+--endregion Patching
 
 --endregion package.path
 
 --region Imports
 
----@type utils
 local utils = require('mp.utils')
----@type options
 local options = require('mp.options')
 ---@type assdraw
 local assdraw = require('mp.assdraw')
 
-local logging = require('logging')
+local logging = require('log-ext')
 local Prefix = logging.Prefix
 local msg    = logging.msg
 
-local Const = require('constants')
-
--- Builtin Utils
--- require('console/console-builtin-extensions')
-require('builtin-extensions-global')
-
---- `script-message` Tracking
+require('builtin-extensions-global') -- 'console-builtin-extensions'
+local Const           = require('constants')
+local Options         = require('console-options')
 local script_messages = require('script-message-tracker')
+local console_ext     = require('console-extensions')
+local history         = require('history')
+local Perf            = require('perf').Perf
 
--- Additional console functionality
-local console_ext = require('console-extensions')
-
-local history = require('history')
-local Perf    = require('perf').Perf
+local is = require('util.guard').is
 
 --endregion Imports
 
@@ -263,7 +374,9 @@ local format = string.format
 
 --endregion Localize
 
---region Arrays
+--region Util
+
+--region Util - Arrays
 
 ---
 ---@param str_arr string[]
@@ -338,49 +451,15 @@ local function longest(str_arr)
     return curr_longest.value, curr_longest.length
 end
 
---endregion Arrays
+--endregion Util - Arrays
+
+--endregion Util
 
 --region Initialize Options
 
 local Platforms = Const.platforms
 
--- Get better font per user operating system
----@param platform MpvPlatform
-local function default_system_font(platform)
-    platform = (Platforms[platform] ~= nil)
-        and platform
-        or Const.platform
-
-    if platform == 'windows'
-    then
-        return 'Consolas'
-    elseif platform == 'macos'
-    then
-        return 'Menlo'
-    else -- default (wayland | x11)
-        return 'monospace'
-    end
-end
-
--- Default options
--- (Made global for extensions subscript)
-_G.opts =
-{
-    --- All drawing is scaled by this value, including the text borders and the
-    --- cursor. Change it if you have a high-DPI display.
-    scale = 1,
-
-    --- Set the font used for the Console and the console. This probably doesn't
-    --- have to be a monospaced font.
-    font = default_system_font(),
-
-    --- Set the font size used for the Console and the console. This will be
-    --- multiplied by "scale."
-    font_size = 16,
-
-    -- Display total history entries/position in history in prompt prefix
-    prompt_hist_pos = true,
-}
+local opts = Options.options
 
 -- Apply user-set options
 options.read_options(opts)
@@ -399,8 +478,10 @@ _G.handle_enter = nil
 
 --region Refactoring to ptty.lua
 
+local con = { }
+
 ---@type boolean
-_G.console_active = false
+_G.active = false
 ---@type boolean
 _G.pending_update = false
 ---@type string
@@ -441,7 +522,8 @@ end)
 
 _G.update_timer:kill()
 
-utils.shared_script_property_observe("osc-margins", function(_, val)
+utils.shared_script_property_observe("osc-margins",
+  function(_, val)
     if val then
         -- formatted as "%f,%f,%f,%f" with left, right, top, bottom, each
         -- value being the border size as ratio of the window size (0.0-1.0)
@@ -449,14 +531,14 @@ utils.shared_script_property_observe("osc-margins", function(_, val)
         for v in string.gmatch(val, "[^,]+") do
             vals[#vals + 1] = tonumber(v)
         end
-        global_margin_y = vals[4] -- bottom
+        _G.global_margin_y = vals[4] -- bottom
     else
-        global_margin_y = 0
+        _G.global_margin_y = 0
     end
     _G.update()
-end)
+  end)
 
---region Console Output
+--region Console - Output
 
 ---
 --- Basic form of log line entry that
@@ -487,7 +569,7 @@ function _G.log_edit(text, update)
 
     if type(update) == 'boolean' and update == true
     then
-        if _G.console_active
+        if _G.active
         then
             if not _G.update_timer:is_enabled()
             then
@@ -507,13 +589,15 @@ end
 ---@param  text  string
 ---@return       nil
 function _G.log_add_plain(text)
-    log_buffer[#log_buffer + 1] = { style = '', text = text }
-    if #log_buffer > buffer_line_max
+    -- _G.log_buffer[#_G.log_buffer + 1] = { style = '', text = text }
+    -- imperceptibly lower perf than [#tbl + 1], not as painful to look at
+    table.insert(_G.log_buffer, { style = '', text = text })
+
+    if #_G.log_buffer > _G.buffer_line_max
     then
-        table.remove(log_buffer, 1)
+        table.remove(_G.log_buffer, 1)
     end
 end
-
 
 ---
 --- Add a line to the log buffer (limited to 100 lines by default)
@@ -523,15 +607,17 @@ end
 ---@param  defer? boolean
 ---@return        nil
 function _G.log_add(style, text, defer)
-    _G.log_buffer[#_G.log_buffer + 1] = { style = style, text = text }
+    -- _G.log_buffer[#_G.log_buffer + 1] = { style = style, text = text }
+    table.insert(_G.log_buffer, { style = style, text = text })
+
     if #_G.log_buffer > _G.buffer_line_max
     then
         -- @NOTE: If this code gets reworked/used for a general, multi-buffer entry case make sure
         --        to also handle the removals correctly (e.g. not hardcoded to 1)
-        table.remove(log_buffer, 1)
+        table.remove(_G.log_buffer, 1)
     end
 
-    if defer == true or not _G.console_active then return end
+    if defer == true or not _G.active then return end
 
     if not _G.update_timer:is_enabled()
     then
@@ -549,7 +635,9 @@ end
 ---@param  wait  boolean | nil
 ---@return       nil
 function _G.log_add_advanced(entry, wait)
-    _G.log_buffer[#_G.log_buffer + 1] = entry -- { style = style, text = text }
+    -- _G.log_buffer[#_G.log_buffer + 1] = entry -- { style = style, text = text }
+    table.insert(_G.log_buffer, entry)
+
     if #_G.log_buffer >  _G.buffer_line_max
     then
         table.remove(_G.log_buffer, 1)
@@ -558,7 +646,7 @@ function _G.log_add_advanced(entry, wait)
     if wait == true
     then
         -- no-redraw
-    elseif _G.console_active
+    elseif _G.active
     then
         if not _G.update_timer:is_enabled()
         then
@@ -609,7 +697,7 @@ local function ass_escape(str, no_escape)
     local disable = type(no_escape) == "table" and no_escape or { }
 
     ---@type string
-    local str = str and str or ''
+    local str = str or ''
 
     -- There is no escape for '\' in ASS (I think?) but '\' is used verbatim if
     -- it isn't followed by a recognised character, so add a zero-width
@@ -633,7 +721,7 @@ end
 
 --endregion Util
 
---endregion Console Output
+--endregion Console - Output
 
 -- Render the Console and console as an ASS OSD
 function _G.update()
@@ -641,14 +729,14 @@ function _G.update()
 
     local dpi_scale = mp.get_property_native("display-hidpi-scale", 1.0)
 
-    dpi_scale = dpi_scale * _G.opts.scale
+    dpi_scale = dpi_scale * opts.scale
 
     local screenx, screeny, aspect = mp.get_osd_size()
     screenx = screenx / dpi_scale
     screeny = screeny / dpi_scale
 
     -- Clear the OSD if the Console is not active
-    if not console_active
+    if not active
     then
         mp.set_osd_ass(screenx, screeny, '')
         return
@@ -680,7 +768,7 @@ function _G.update()
     -- Render log messages as ASS. This will render at most screeny / font_size messages.
     local log_ass = ''
     -- @NOTE: math.ceil only takes one arg?
-    local viewable_log_message_count = math.min(#_G.log_buffer, math.ceil(screeny, _G.opts.font_size))
+    local viewable_log_message_count = math.min(#_G.log_buffer, math.ceil(screeny, opts.font_size))
 
     -- @TODO: Inline function calls if affecting speed
     -- @TODO: Return escaped string to position in line/node buffer and allow the now semi-memoized
@@ -747,7 +835,7 @@ function _G.update()
     -- @NOTE: Special case for drawing history position—if position is one over the history
     --        entry total, assume its the active input buffer, and don't draw.
     local prompt_before_body = style .. '> ' .. before_cur
-    if _G.opts.prompt_hist_pos == true and (_G.history_pos ~= #_G.history_orig + 1)
+    if opts.prompt_hist_pos == true and (_G.history_pos ~= #_G.history_orig + 1)
     then
         local hist_len = #_G.history_orig
         local pad_num = tostring(tostring(hist_len):len())
@@ -778,16 +866,16 @@ end
 
 -- Set the Console visibility ("enable", Esc)
 local function set_active(active)
-    if active == _G.console_active then return end
+    if active == _G.active then return end
     if active
     then
-        _G.console_active = true
-        insert_mode = false
+        _G.active = true
+        _G.insert_mode    = false
         mp.enable_key_bindings('console-input', 'allow-hide-cursor+allow-vo-dragging')
         mp.enable_messages('terminal-default')
         _G.define_key_bindings()
     else
-        _G.console_active = false
+        _G.active = false
         _G.undefine_key_bindings()
         mp.enable_messages('silent:terminal-default')
         collectgarbage()
@@ -812,10 +900,12 @@ local function show_and_type(text, eval_immediately)
     end
 
     -- Save the line currently being edited, just in case
-    if _G.line ~= text
+    if #_G.line ~= text
        and _G.line ~= ''
        -- and history.last ~= _G.line
-       and _G.history_orig[#_G.history_orig] ~= _G.line
+       and ((#_G.history_orig < 1)
+             or
+            (_G.history_orig[#_G.history_orig] ~= _G.line))
     then
         log.debug('Saving current line to history before possibly clearing.')
         -- history:add(_G.line)
@@ -829,12 +919,14 @@ local function show_and_type(text, eval_immediately)
 
     -- @TODO: Best time to place this after?
     -- If immediate exec then simulate enter press
-    if eval_immediately then
+    if eval_immediately
+    then
         log.debug('Evaluating console line immedately, calling `handle_enter`.')
         _G.handle_enter()
     end
 
-    if _G.console_active then
+    if _G.active
+    then
         log.debug('Console is active, calling global update function.')
         _G.update()
     else
@@ -842,8 +934,6 @@ local function show_and_type(text, eval_immediately)
         set_active(true)
     end
 end
-
--- string.gmatch
 
 --region UTF Util
 
@@ -888,7 +978,8 @@ end
 
 -- Close the console if the current line is empty, otherwise do nothing (Ctrl+D)
 local function close_console_if_empty()
-    if _G.line == '' then
+    if _G.line == ''
+    then
         set_active(false)
     end
 end
@@ -959,21 +1050,21 @@ end
 
 ---@alias CommandList CommandInfo[] @ Native value of `command-list` property.
 
+local log = msg.extend('!help')
 -- Help Display Function-copied from new console script(migration of repl.lua)
 -- TODO: Make columns or something for the list outputs its horrible
 ---@param param string
 local function help_command_custom(param)
-    local dbg = Prefix.msg_method('!help', debug)
 
     -- Process possible dangerous optional param
     local param = param or nil
     if type(param) == 'nil'
     then
-        dbg([[`param` argument appears to be nil.]])
+        log.debug([[`param` argument appears to be nil.]])
         -- Now it can be set to a string
         param = ''
     else
-        dbg(string.format('`param` equals: `%s`', tostring(param)))
+        log.debug(string.format('`param` equals: `%s`', tostring(param)))
     end
 
     ---@type CommandList
@@ -1065,23 +1156,23 @@ script_messages.register('?', help_command_custom)
 ---@param memory number | PerfEventEntry
 local function format_perf_memory(memory)
     local value =
-        type(memory) == 'number' and memory        or
-        type(memory) == 'table'  and memory.memory
-            or nil
+           (type(memory) == 'number' and memory)
+        or (type(memory) == 'table'  and memory.memory)
+        or nil
 
-    if value == nil then error('Invalid memory size value: ' .. tostring(memory)) end
+    assert(is.Number(value), 'Parsed value of `memory` parameter is a valid number.')
 
     -- Multiply by 1024 for bytecount, so divide 1024 for mb?
     local mb = (value / 1024)
 
-    return ('%3.3fMB'):format(tostring(mb))
+    return ('%3.3fMB'):format(mb)
 end
 
 -- Display memory usage
 script_messages.register('mem', function()
     -- Record fresh sample
     Perf.record('mem script-message call')
-    log_add_advanced({
+    _G.log_add_advanced({
         {
             style = "{\\1c&HCCCCCC&}",
             text = string.format('Memory Usage: %s', format_perf_memory(Perf.last.memory))
@@ -1107,7 +1198,7 @@ local function reload(delay_ms)
     log.info('Setting mp.keep_running to false...')
     mp.keep_running = false
 end
-script_messages.register('reload', reload)
+script_messages.register('reload-console', reload)
 
 --endregion Modded Help
 
@@ -1134,16 +1225,14 @@ do local match = string.match
 end
 
 ---TODO: Needs to be migrated to final processing chain implementation
----@param  line string
----@return      string, number
-local function expand_script_message_alias(line)
-    local line = line or ''
-    if not line or line == '' then return '' end
+---@param  statement string
+---@return string    expanded_statement
+---@return number    expansions_count
+local function expand_script_message_alias(statement)
+    local statement = trim(statement or '')
+    if not statement or statement == '' then return '' end
 
-    local trimmed_line = trim(line)
-    if trimmed_line == '' then return trimmed_line end
-
-    return trimmed_line:gsub('^!%s*', 'script-message ')
+    return statement:gsub('^!%s*', 'script-message ')
 end
 
 --endregion script-message alias
@@ -1174,7 +1263,8 @@ local log = msg.extend('handle_char_input')
 ---@param c? string
 local function handle_char_input(c)
 
-    -- @NOTE Added to fix crash on Shift+Enter (incorrect bind1 implementation), keeping for now
+    --[[
+    -- @NOTE Added to fix crash on Shift+Enter (incorrect bind1 implementation)
     if not (type(c) == 'string' and #c > 0)
     then
         log.warn('c parameter is not a string, exiting early.')
@@ -1185,23 +1275,27 @@ local function handle_char_input(c)
         log.warn('c parameter is a zero length string, exiting early.')
         return
     end
+    ]]--
 
-    if insert_mode then
+    if _G.insert_mode == true
+    then
         _G.line = _G.line:sub(1, _G.cursor - 1) .. c .. _G.line:sub(next_utf8(_G.line, _G.cursor))
     else
         _G.line = _G.line:sub(1, _G.cursor - 1) .. c .. _G.line:sub(_G.cursor)
     end
+
     _G.cursor = _G.cursor + #c
     _G.update()
 end
 
 --- Process keyboard input event (??)
 local function text_input(info)
-    if not info.key_text then
-        return
+    if not info.key_text then return
+
     elseif info.event == "press"
         or info.event == "down"
-        or info.event == "repeat" then
+        or info.event == "repeat"
+    then
         handle_char_input(info.key_text)
     end
 end
@@ -1209,6 +1303,7 @@ end
 -- Remove the character behind the cursor (Backspace)
 local function handle_backspace()
     if _G.cursor <= 1 then return end
+
     local prev = prev_utf8(_G.line, cursor)
     _G.line = _G.line:sub(1, prev - 1) .. _G.line:sub(cursor)
     _G.cursor = prev
@@ -1218,20 +1313,21 @@ end
 -- Remove the character in front of the cursor (Del)
 local function handle_del()
     if _G.cursor > _G.line:len() then return end
-    _G.line = _G.line:sub(1, _G.cursor - 1) .. _G.line:sub(next_utf8(_G.line, _G.cursor))
+    _G.line = _G.line:sub(1, _G.cursor - 1)
+                .. _G.line:sub(next_utf8(_G.line, _G.cursor))
     _G.update()
 end
 
 -- Toggle insert mode (Ins)
 local function handle_ins()
-    insert_mode = not insert_mode
+    _G.insert_mode = not _G.insert_mode
 end
 
 -- Clear the current line (Ctrl+C)
 local function clear()
-    _G.line = ''
-    _G.cursor = 1
-    insert_mode = false
+    _G.line        = ''
+    _G.cursor      = 1
+    _G.insert_mode = false
     _G.history_pos = #history_orig + 1
     _G.update()
 end
@@ -1333,11 +1429,11 @@ local function go_history(new_pos, no_update)
 end
 
 --- Go to the specified relative position in the command history (Up, Down)
-local function move_history(amount)
-    go_history(_G.history_pos + amount)
+local function move_history(offset)
+    go_history(_G.history_pos + offset)
 end
 
-local hlog = msg.extend('history-prefix-search')
+local hlog  = msg.extend('history-prefix-search')
 local hlogb = hlog.extend('back')
 ---
 --- Move to previous history entry starting with current line content
@@ -1418,13 +1514,13 @@ local function go_history_prefix_forward(line, increment_on_failure)
     -- -- Original:
     -- line = line or _G.line
     -- Condition only for debugging
-    if type(line) ~= 'string'
+    if not is.String(line)
     then
         line = _G.line
         hlogf.debug('Defaulting to current line as search prefix: «%s»', _G.line)
     end
 
-    if type(increment_on_failure) ~= 'boolean'
+    if not is.Boolean(increment_on_failure)
     then
         increment_on_failure = true
     end
@@ -1505,17 +1601,19 @@ _G.handle_enter = function()
     log.debug('Console line content at time of enter handle: "%s"', line_init)
 
     -- Exit immediately if no non-whitespace content
-    local line_trimmed = line_init:gsub('^%s+', '')
-                                  :gsub('%s+$', '')
+    local line_trimmed = trim(line_init) -- line_init:gsub('^%s+', ''):gsub('%s+$', '')
     if line_trimmed == '' then return end
 
     -- Record (unprocessed) input line to history if option variable set true
-    if save_preexpanded_line_in_history == true and history_orig[#history_orig] ~= line_init then
-        history_orig[#history_orig + 1] = line_init
+    if save_preexpanded_line_in_history == true
+        and _G.history_orig[#_G.history_orig] ~= line_init
+    then
+        _G.history_orig[#_G.history_orig + 1] = line_init
     end
 
     local preprocess_fn = console_ext.preprocess_line
-    if type(preprocess_fn) == "function" then
+    if is.Function(preprocess_fn)
+    then
         log.debug('Using extended input preprocessing function.')
         log.debug('Line Input:\n%q', line_init)
 
@@ -1534,9 +1632,11 @@ _G.handle_enter = function()
     --      dedicated to any additional processing
     -- match "help [<text>]", return <text> or "", strip all whitespace
     local matched_help =
-        line:match('^%s*help%s+(.-)%s*$') or (line:match('^%s*help$') and '')
+        _G.line:match('^%s*help%s+(.-)%s*$')
+            or (_G.line:match('^%s*help$')        and '')
     local matched_help_mod =
-        line:match('^%s*help[_-]mod%s+(.-)%s*$') or (line:match('^%s*help[_-]mod$') and '')
+        _G.line:match('^%s*help[_-]mod%s+(.-)%s*$')
+            or (_G.line:match('^%s*help[_-]mod$') and '')
 
     if matched_help_mod
     then
@@ -1558,19 +1658,22 @@ _G.handle_enter = function()
 
     else
         log.trace('Entered final block.')
+
         local processed_line, expansion_count = expand_script_message_alias(line_proc)
         if expansion_count and expansion_count > 0
         then
-            log.trace('Processed ! aliases: %s', string.dquot(processed_line))
+            log.trace('Processed ! aliases: %s',
+                string.dquot(processed_line))
         end
         if not save_preexpanded_line_in_history
-            or (processed_line ~= line_init and history_orig[#history_orig] ~= processed_line )
+            or (processed_line ~= line_init
+                and _G.history_orig[#_G.history_orig] ~= processed_line)
         then
             log.debug('Writing processed line to history')
             -- Push transformed line to history
-            if history_orig[#history_orig] ~= processed_line
+            if _G.history_orig[#_G.history_orig] ~= processed_line
             then
-                history_orig[#history_orig + 1] = processed_line
+                _G.history_orig[#_G.history_orig + 1] = processed_line
             end
         end
 
@@ -1581,7 +1684,7 @@ _G.handle_enter = function()
             return
         end
 
-        _G.log_add('{\\1c&H99cc99&}', '  $ ' .. (processed_line) .. "\n")
+        _G.log_add('{\\1c&H99cc99&}', '  $ ' .. processed_line .. "\n")
         mp.command(processed_line)
     end
     --endregion Command Processing
@@ -1599,26 +1702,29 @@ end
 --- string in order to do a "backwards" find. This wouldn't be as annoying
 --- to do if Lua didn't insist on 1-based indexing.
 function _G.prev_word()
-    _G.cursor = line:len() - select(2, line:reverse():find('%s*[^%s]*', line:len() - _G.cursor + 2)) + 1
+    _G.cursor =
+        _G.line:len()
+            - select(2, _G.line:reverse():find('%s*[^%s]*', _G.line:len() - _G.cursor + 2))
+            + 1
     _G.update()
 end
 
 -- Move to the end of the current word, or if already at the end, the end of
 -- the next word. (Ctrl+Right)
 function _G.next_word()
-    _G.cursor = select(2, line:find('%s*[^%s]*', _G.cursor)) + 1
+    _G.cursor = select(2, _G.line:find('%s*[^%s]*', _G.cursor)) + 1
     _G.update()
 end
 
 -- Move the cursor to the next character (Right)
 function _G.next_char(amount)
-    _G.cursor = next_utf8(line, _G.cursor)
+    _G.cursor = next_utf8(_G.line, _G.cursor)
     _G.update()
 end
 
 -- Move the cursor to the previous character (Left)
 function _G.prev_char(amount)
-    _G.cursor = prev_utf8(line, _G.cursor)
+    _G.cursor = prev_utf8(_G.line, _G.cursor)
     _G.update()
 end
 
@@ -1630,7 +1736,7 @@ end
 
 -- Move the cursor to the end of the line (END)
 function _G.go_end()
-    _G.cursor = line:len() + 1
+    _G.cursor = _G.line:len() + 1
     _G.update()
 end
 
@@ -1659,8 +1765,6 @@ end
 --- A list of generated candidate completion values.
 ---@field public list    CompletionList
 
----
----
 ---
 ---@class DynCompletionSet: CompletionSetBase
 ---@field public resolver fun(line: string): CompletionList
@@ -1763,13 +1867,16 @@ end
 local function build_macro_completions()
     log.trace('[macros] Building macro completion list')
 
+    -- Replace global use
+    local macros = _G.macros -- console_ext.get_macros()
+
     ---@type CompletionList
     local macro_comps = { }
 
-    if console_ext.macros
+    if is.Table(macros)
     then
         local macro_symbols = { }
-        for symbol in pairs(console_ext.macros)
+        for symbol in pairs(macros)
         do
             macro_symbols[#macro_symbols + 1] = symbol
         end
@@ -1778,7 +1885,7 @@ local function build_macro_completions()
 
         for _, symbol in ipairs(macro_symbols)
         do
-            if type(symbol) == "string"
+            if is.String(symbol)
             then
                 macro_comps[#macro_comps + 1] = symbol
             end
@@ -1788,8 +1895,11 @@ local function build_macro_completions()
     return macro_comps
 end
 
+-- @TODO: Lazy build prop completions? e.g. Don't build three times as many propery completions
+--        (options/*, option-info/*) if property doesn't start with `o`
+
 ---
---- Generate list of macro symbol completions
+--- Generate list of macros symbol completions
 ---
 ---@return CompletionList
 local function build_prop_completions()
@@ -1807,7 +1917,7 @@ local function build_prop_completions()
     ---@type string[]
     local prop_list = raw_prop_list
 
-    for _, opt in ipairs(mp.get_property_native('options'))
+    for _, opt in ipairs(mp.get_property_native('options', { }))
     do
         prop_list[#prop_list + 1] = 'options/' .. opt
         prop_list[#prop_list + 1] = 'file-local-options/' .. opt
@@ -1887,7 +1997,8 @@ local function build_command_completions()
 
     local cmd_list = { }
 
-    for i, cmd in ipairs(mp.get_property_native('command-list')) do
+    for i, cmd in ipairs(mp.get_property_native('command-list'))
+    do
         cmd_list[i] = cmd.name
     end
 
@@ -1895,6 +2006,7 @@ local function build_command_completions()
 
     return cmd_list
 end
+
 ---@return Completions
 local function build_completers()
     log.trace('Starting completion set enumerations')
@@ -1941,12 +2053,14 @@ local function build_completers()
     -- Only match for completion with at least beginning character
     local token_part = '[' .. token_char_base .. ']+'
 
-    local bracket_begin = '[%$]{'
+    -- @NOTE: Added optional `=` inside backet begin to also complete formatted options
+    local bracket_begin = '[%$]{[=]?'
 
     --endregion Pattern Components
 
     ---@type Completions
-    local completions = {
+    local completions =
+    {
         { pattern = '^%s*()[%w_-]+()$', list = cmd_list, append = ' ' },
 
         -- Macros
@@ -2020,16 +2134,19 @@ function get_all_completions(part, list)
     ---@type string[]
     local partials = {}
 
-    for _, candidate in ipairs(list) do
-        if candidate:starts_with(part) then
+    for _, candidate in ipairs(list)
+    do
+        if candidate:starts_with(part)
+        then
             -- If completion value does not exactly equal the input part (part is prefix of completion)
-            if candidate ~= part then
-                ---@type number
+            if candidate ~= part
+            then
                 table.insert(partials, candidate)
             else
                 exact = candidate
             end
         else
+
         end
     end
 
@@ -2048,12 +2165,15 @@ local function complete_match(part, list)
     local completion = nil
     local full_match = false
 
-    for _, candidate in ipairs(list) do
-        if candidate:sub(1, part:len()) == part then
-            if completion and completion ~= candidate then
+    for _, candidate in ipairs(list)
+    do
+        if candidate:sub(1, part:len()) == part
+        then
+            if completion and completion ~= candidate
+            then
                 local prefix_len = part:len()
-                while completion:sub(1, prefix_len + 1)
-                       == candidate:sub(1, prefix_len + 1) do
+                while completion:sub(1, prefix_len + 1) == candidate:sub(1, prefix_len + 1)
+                do
                     prefix_len = prefix_len + 1
                 end
                 completion = candidate:sub(1, prefix_len)
@@ -2116,7 +2236,8 @@ local function complete()
                     log.trace('Completion had %s partial completions.', #partials)
                     local partials_to_complete = partials
 
-                    if #partials_to_complete > 0 then
+                    if #partials_to_complete > 0
+                    then
                         -- Used as reference and as storage if limit is hit.
 
                         -- @TODO: Make some of these params user configurable
@@ -2132,11 +2253,13 @@ local function complete()
                         ---@type boolean
                         local comp_hit_fragment_limit = false
                         --- Only update if actually a valid limit
-                        if comp_fragment_limit > 0 then
+                        if comp_fragment_limit > 0
+                        then
                             comp_hit_fragment_limit = (#partials_to_complete > comp_fragment_limit)
                         end
 
-                        if comp_hit_fragment_limit then
+                        if comp_hit_fragment_limit
+                        then
                             -- msg.trace('Hit completion fragment limit, reducing.')
                             -- To complete partial count reduction
 
@@ -2161,8 +2284,8 @@ local function complete()
 
                         -- Add heading to completion list
                         -- @TODO: Why doesn't this work?
-                        log_add(comp_header_style, 'Completions:')
-                        -- log_add('', "\n")
+                        _G.log_add(comp_header_style, 'Completions:')
+                        -- _G.log_add('', "\n")
 
                         local pad_amount = 18
 
@@ -2176,17 +2299,20 @@ local function complete()
 
                         -- Get longest result for calculating padding
                         local longest, longest_length = longest(partials_to_complete)
-                        if longest and longest_length > 0 then
+                        if longest and longest_length > 0
+                        then
                             pad_amount = #longest + 3
                         end
                         local last_idx = 3
                         local idx      = 0
                         local curr     = ''
 
-                        for _, partial in ipairs(partials_to_complete) do
+                        for _, partial in ipairs(partials_to_complete)
+                        do
                             idx  = idx + 1
                             curr = curr .. partial:pad_right(pad_amount, ' ')
-                            if idx >= last_idx then
+                            if idx >= last_idx
+                            then
                                 _G.log_add(comp_style, '\n' .. curr)
                                 curr = ''
                                 idx = 0
@@ -2197,7 +2323,8 @@ local function complete()
 
                         -- Add the remaining two completion values if not
                         -- logged yet
-                        if #curr > 0 then
+                        if #curr > 0
+                        then
                             _G.log_add(comp_style,   '\n' .. curr .. '\n')
                         else
                             _G.log_add('', "\n\n")
@@ -2212,6 +2339,7 @@ local function complete()
                 _G.cursor = #before_cur + 1
                 line   = before_cur .. after_cur
                 _G.update()
+
                 return
             end
         end
@@ -2248,7 +2376,9 @@ end
 
 --endregion Clipboard Access
 
---region Keybinding Management
+--region Keybindings
+
+--region Keybindings Management
 
 -- List of input bindings. This is a weird mashup between common GUI text-input
 -- bindings and readline bindings.
@@ -2261,122 +2391,64 @@ local function get_bindings()
 
     local noop = function() end
 
-    local bindings = nil
+    local bindings =
+    {
+        { 'esc',         bind1(set_active, false) },
+        { 'enter',       _G.handle_enter                        },
+        { 'kp_enter',    _G.handle_enter                        },
+        { 'shift+enter', bind1(handle_char_input,'\n')          },
+        { 'bs',          handle_backspace                       },
+        { 'shift+bs',    handle_backspace                       },
+        { 'del',         handle_del                             },
+        { 'shift+del',   handle_del                             },
+        { 'ins',         handle_ins                             },
+        { 'shift+ins',   bind1(paste, false)                    },
+        { 'mbtn_mid',    bind1(paste, false)                    },
+        { 'left',        thunk(_G.prev_char)                    },
+        { 'right',       thunk(_G.next_char)                    },
+        { 'up',          thunk(go_history_prefix_backward)      }, -- { 'up',          function() move_history(-1) end        },
+        { 'wheel_up',    bind1(move_history, -1)                },
+        { 'down',        thunk(go_history_prefix_forward)       }, -- { 'down',        function() move_history(1) end         },
+        { 'wheel_down',  bind1(move_history, 1)                 },
+        { 'wheel_left',  noop                                   },
+        { 'wheel_right', noop                                   },
+        { 'ctrl+left',   _G.prev_word                           },
+        { 'ctrl+right',  _G.next_word                           },
+        { 'tab',         complete                               },
+        { 'home',        _G.go_home                             },
+        { 'end',         _G.go_end                              },
+        { 'pgup',        _G.handle_pgup                         },
+        { 'pgdwn',       _G.handle_pgdown                       },
+        { 'ctrl+c',      clear                                  },
+        { 'ctrl+d',      close_console_if_empty                 },
+        { 'ctrl+k',      del_to_eol                             },
+        { 'ctrl+l',      clear_log_buffer                       },
+        { 'ctrl+u',      del_to_start                           },
+        { 'ctrl+v',      bind1(paste, true)                     },
+        { 'meta+v',      bind1(paste, true)                     },
+        { 'ctrl+w',      _G.del_word                            },
+        { 'Ctrl+BS',     _G.del_word                            },
+        { 'Alt+BS',      _G.del_word                            },
+        { 'kp_dec',      bind1(handle_char_input, '.') },
+        -- Console output size ++/--
+        -- macOS => cmd + =
+        --          cmd + -
+        { 'Meta+=',      function() mp.commandv([[script-message]], [[console-size]], [[++]]) end },
+        { 'Meta+-',      function() mp.commandv([[script-message]], [[console-size]], [[--]]) end },
+        -- win10 => ctrl + =
+        --          ctrl + -
+        { 'ctrl+=',      function() mp.commandv([[script-message]], [[console-size]], [[++]]) end },
+        { 'ctrl+-',      function() mp.commandv([[script-message]], [[console-size]], [[--]]) end },
+    }
 
-    -- @TODO Remove original bindings and all related scaffolding after this works
-    local NEW_BINDINGS = true
-    if NEW_BINDINGS
-    then
-        bindings =
-        {
-            { 'esc',         bind1(set_active, false) },
-            { 'enter',       _G.handle_enter                        },
-            { 'kp_enter',    _G.handle_enter                        },
-            { 'shift+enter', bind1(handle_char_input,'\n')          },
-            { 'bs',          handle_backspace                       },
-            { 'shift+bs',    handle_backspace                       },
-            { 'del',         handle_del                             },
-            { 'shift+del',   handle_del                             },
-            { 'ins',         handle_ins                             },
-            { 'shift+ins',   bind1(paste, false)                    },
-            { 'mbtn_mid',    bind1(paste, false)                    },
-            { 'left',        thunk(_G.prev_char)                    },
-            { 'right',       thunk(_G.next_char)                    },
-            { 'up',          thunk(go_history_prefix_backward)      }, -- { 'up',          function() move_history(-1) end        },
-            { 'wheel_up',    bind1(move_history, -1)                },
-            { 'down',        thunk(go_history_prefix_forward)       }, -- { 'down',        function() move_history(1) end         },
-            { 'wheel_down',  bind1(move_history, 1)                 },
-            { 'wheel_left',  noop                                   },
-            { 'wheel_right', noop                                   },
-            { 'ctrl+left',   _G.prev_word                           },
-            { 'ctrl+right',  _G.next_word                           },
-            { 'tab',         complete                               },
-            { 'home',        _G.go_home                             },
-            { 'end',         _G.go_end                              },
-            { 'pgup',        _G.handle_pgup                         },
-            { 'pgdwn',       _G.handle_pgdown                       },
-            { 'ctrl+c',      clear                                  },
-            { 'ctrl+d',      close_console_if_empty                 },
-            { 'ctrl+k',      del_to_eol                             },
-            { 'ctrl+l',      clear_log_buffer                       },
-            { 'ctrl+u',      del_to_start                           },
-            { 'ctrl+v',      bind1(paste, true)                     },
-            { 'meta+v',      bind1(paste, true)                     },
-            { 'ctrl+w',      _G.del_word                            },
-            { 'Ctrl+BS',     _G.del_word                            },
-            { 'Alt+BS',      _G.del_word                            },
-            { 'kp_dec',      bind1(handle_char_input, '.') },
-            -- Console output size ++/--
-            -- macOS => cmd + =
-            --          cmd + -
-            { 'Meta+=',      function() mp.commandv([[script-message]], [[console-size]], [[++]]) end },
-            { 'Meta+-',      function() mp.commandv([[script-message]], [[console-size]], [[--]]) end },
-            -- win10 => ctrl + =
-            --          ctrl + -
-            { 'ctrl+=',      function() mp.commandv([[script-message]], [[console-size]], [[++]]) end },
-            { 'ctrl+-',      function() mp.commandv([[script-message]], [[console-size]], [[--]]) end },
-        }
-    else
-        bindings =
-        {
-            { 'esc',         function() set_active(false) end       },
-            { 'enter',       handle_enter                           },
-            { 'kp_enter',    handle_enter                           },
-            { 'shift+enter', function() handle_char_input('\n') end },
-            { 'bs',          handle_backspace                       },
-            { 'shift+bs',    handle_backspace                       },
-            { 'del',         handle_del                             },
-            { 'shift+del',   handle_del                             },
-            { 'ins',         handle_ins                             },
-            { 'shift+ins',   function() paste(false) end            },
-            { 'mbtn_mid',    function() paste(false) end            },
-            { 'left',        function() prev_char() end             },
-            { 'right',       function() next_char() end             },
-            { 'up',          function() go_history_prefix_backward() end }, -- { 'up',          function() move_history(-1) end        },
-            { 'wheel_up',    function() move_history(-1) end        },
-            { 'down',        function() go_history_prefix_forward()  end }, -- { 'down',        function() move_history(1) end         },
-            { 'wheel_down',  function() move_history(1) end         },
-            { 'wheel_left',  function() end                         },
-            { 'wheel_right', function() end                         },
-            { 'ctrl+left',   prev_word                              },
-            { 'ctrl+right',  next_word                              },
-            { 'tab',         complete                               },
-            { 'home',        go_home                                },
-            { 'end',         go_end                                 },
-            { 'pgup',        handle_pgup                            },
-            { 'pgdwn',       handle_pgdown                          },
-            { 'ctrl+c',      clear                                  },
-            { 'ctrl+d',      close_console_if_empty                 },
-            { 'ctrl+k',      del_to_eol                             },
-            { 'ctrl+l',      clear_log_buffer                       },
-            { 'ctrl+u',      del_to_start                           },
-            { 'ctrl+v',      function() paste(true) end             },
-            { 'meta+v',      function() paste(true) end             },
-            { 'ctrl+w',      del_word                               },
-            { 'Ctrl+BS',     del_word                               },
-            { 'Alt+BS',      del_word                               },
-            { 'kp_dec',      function() handle_char_input('.') end  },
-            -- Console output size ++/--
-            -- macOS => cmd + =
-            --          cmd + -
-            { 'Meta+=',      function() mp.commandv([[script-message]], [[console-size]], [[++]]) end },
-            { 'Meta+-',      function() mp.commandv([[script-message]], [[console-size]], [[--]]) end },
-            -- win10 => ctrl + =
-            --          ctrl + -
-            { 'ctrl+=',      function() mp.commandv([[script-message]], [[console-size]], [[++]]) end },
-            { 'ctrl+-',      function() mp.commandv([[script-message]], [[console-size]], [[--]]) end },
-        }
-    end
-
-    for i = 0, 9 do
+    for i = 0, 9
+    do
         bindings[#bindings + 1] =
             {'kp' .. i, function() handle_char_input('' .. i) end}
     end
 
     return bindings
 end
-
---region Keybindings
 
 --region New Input Implementation
 
@@ -2449,19 +2521,21 @@ mp.add_key_binding(nil, 'enable', function() set_active(true) end)
 
 --endregion Keybindings
 
+--region Console Input via script-message
+
 -- Add a script-message to show the Console and fill it with the provided text
-local type_script_message = nil
-do
-    local log = logging.Prefix.fmsg('!type', 'debug')
-    function type_script_message(text, immediate)
-        -- local dbg = logging.Prefix.fmsg('!type', 'debug')
+local log = logging.Prefix.fmsg('!type', 'debug')
+local function type_script_message(text, immediate)
+    log.debug('Entered type script-message handler, calling show_and_type with text:\n"%s"', text)
 
-        log.debug('Entered type script-message handler, calling show_and_type with text:\n"%s"', text)
-
-        show_and_type(typed, immedidate)
-    end
+    show_and_type(typed, immedidate)
 end
+
 script_messages.register('type', type_script_message)
+
+--endregion Console Input via script-message
+
+--region Initialize Observers
 
 -- Redraw the Console when the OSD size changes. This is needed because the
 -- PlayRes of the OSD will need to be adjusted.
@@ -2469,11 +2543,13 @@ mp.observe_property('osd-width',           'native', update)
 mp.observe_property('osd-height',          'native', update)
 mp.observe_property('display-hidpi-scale', 'native', update)
 
+--endregion Initialize Observers
+
+--region Console Log Output
+
 -- Enable log messages. In silent mode, mpv will queue log messages in a buffer
 -- until enable_messages is called again without the silent: prefix.
 mp.enable_messages('silent:terminal-default')
-
---region Console Log Output
 
 --region Console Log Filter
 
@@ -2482,7 +2558,8 @@ local ConsoleLogFilter = require('LogFilter')
 --endregion Console Log Filter
 
 ---@param e LogEventTable
-function ingest_log_message(e)
+local function ingest_log_message(e)
+    -- @TODO: Seeing `[cplayer] Saving state.` again in console output, make sure this is working
     if ConsoleLogFilter.is_blacklisted(e) then return end
 
     -- Filter out trace-level log messages, even if the terminal-default log
