@@ -17,6 +17,7 @@
 ---@field level  MessageLevel
 ---@field text   string
 
+local utils = require('mp.utils')
 local logging = require('log-ext')
 local ctx_log = logging.Prefix.fmsg
 local ib_log = logging.Prefix.fmsg('is_blacklist')
@@ -40,6 +41,55 @@ local function should_never_trace(log_event)
                 or log_event.level == 'fatal'
         )
 end
+
+--region ConsoleLogFilter tracing
+
+-- @TODO Integrate this properly after fixing filtering
+
+local filter_trace = { }
+do local M = { } (function()
+    M.enabled = true
+    local log_dir = utils.join_path(os.getenv('HOME'), '.log' )
+    local log_name = 'mpv-console-LogFilter.log'
+    local log_path = utils.join_path(log_dir, log_name)
+    ---@return string
+    local function timestamp()
+        return os.date([=[[%m.%d.%Y-%H.%M.%S]]=])
+    end
+
+    local output_handler = function(msg) print(msg) end
+    -- Check if output file directory exists, switch handler if so
+    do local log_dir_info = utils.file_info(log_path)
+        if log_dir_info and log_dir_info.is_dir
+        then
+            local log_file, err = io.open(log_path, 'a')
+            if err
+            then
+                print('Failed to initialize log file handle: ' .. err)
+                return
+            end
+            output_handler = function(msg)
+                if type(msg) == 'string' and #msg > 0
+                then
+                    io.write(log_file, msg .. '\n')
+                    log_file:flush()
+                end
+            end
+        end
+    end
+
+    M.is_blacklisted_dprint = function(format_string, ...)
+        if type(format_string) == 'string' and #format_string > 0
+        then
+            output_handler(("%s %s " .. format_string):format(timestamp, '[ConsoleLogFilter::is_blacklisted]', ...))
+        end
+    end
+
+    filter_trace = M
+end)() end
+local dprint = filter_trace.is_blacklisted_dprint
+
+--endregion ConsoleLogFilter tracing
 
 local ConsoleLogFilter = nil -- Predeclaration for self-reference
 ConsoleLogFilter =
@@ -96,6 +146,12 @@ ConsoleLogFilter =
     ---@param  event LogEventTable
     ---@return       boolean
     is_blacklisted = function(event)
+        -- Just placing this here again for now
+        if event.prefix == 'overflow'
+        then
+            return
+        end
+
         ---@type string[]
         local target_rules = { }
 
@@ -107,6 +163,8 @@ ConsoleLogFilter =
             return rule.silent == false and not should_never_trace(event)
         end
 
+        -- dprint('Checking blacklisted: [%s]:%s', event.level, event.text)
+
         -- Start by checking more coarse filtering rules first (level, prefix), and in the process
         -- also collect list of relevant rulesets to for finer filters below
         for rule_name, rule in pairs(ConsoleLogFilter.rules)
@@ -116,6 +174,8 @@ ConsoleLogFilter =
                 target_rules[#target_rules + 1] = rule_name
                 if rule.never == true
                 then
+                    -- dprint('[%s:%s] Matched rule: never', event.prefix, event.level)
+
                     -- Only add log message if not console related
                     -- @TODO: Add a silent property on filter rule definitions to disable trace logging
                     if should_trace_event(event, rule)
@@ -135,6 +195,7 @@ ConsoleLogFilter =
         -- Main scan loop for each prefix ruleset
         for _, rule_name in ipairs(target_rules)
         do
+            -- dprint('  Checking full rule: %s', rule_name)
             local rule = ConsoleLogFilter.rules[rule_name]
 
             -- Event level match
@@ -144,6 +205,8 @@ ConsoleLogFilter =
                 do
                     if event.level == level and should_trace_event(event, rule)
                     then
+                        -- dprint('  - Matched level: %s', level)
+
                         ib_log.trace('[LogFilter:%s:level] Matched: %s', event.level, level)
                         return true
                     end
@@ -157,6 +220,8 @@ ConsoleLogFilter =
                 do
                     if text:starts_with(prefix)
                     then
+                        -- dprint('  - Matched prefix: %s', prefix)
+
                         if should_trace_event(event, rule)
                         then
                             ib_log.trace('[LogFilter:%s:prefixes] Matched: %s', event.prefix, prefix)
