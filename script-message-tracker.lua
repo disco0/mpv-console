@@ -20,14 +20,23 @@ local script_message_names = { }
 local external_script_message_names =
 {
     -- curvesman
+    'tone-toggle',
+    'tone-up',
+    'tone-down',
+    'tone-show',
     'tone-upper',
-    'curves-brighten-upper',
-    'curves-brighten',
-    'curves-brighten-toggle',
-    'curves-brighten-tone',
-    'curves-brighten-show',
-    'curves-cooler-show',
-    'curves-temp-tone'
+    'tone-shift',
+    'tone-reset',
+
+    'temp-show',
+    'temp-upper',
+    'temp-cooler',
+    'temp-shift',
+
+    'curves-quiet',
+    'curves-restart',
+    'curves-dbg',
+    'curves-quit',
 }
 
 --region Script-Message Wrapper
