@@ -164,16 +164,21 @@ package_path_patch.options =
 
 --endregion Configuration
 
---region Patching
+--region package.path Patching
 
 (function()
+    local msg = mp.msg
     if package_path_patch.options.enabled ~= true
     then
-        mp.msg.trace(string.format(
-            'Skipped package.path patch, keeping default:%s',
-            -- Split on separator and indent each path
-            package.path:gsub(';', "\n  "):gsub('^', "\n  ")))
-
+        msg.trace(
+            ('Skipped package.path patch, keeping default:%s'):format(
+                -- Split on separator and indent each path
+                package.path
+                    :gsub(';', "\n  ")
+                    :gsub('^', "\n  ")
+                    -- @TODO: Move anonymization of paths into a separate function if this
+                    --        gets more involved
+                    :gsub(os.getenv('HOME')..'[/\\]*', '<HOME>/')))
         return
     end
 
@@ -182,7 +187,11 @@ package_path_patch.options =
 
         ---@return table<number, any>
         ---@see    tablelib.pack
-        local pack   = _G.pack or table.pack or function(...) return {n = select('#', ...), ...} end
+        local pack   =
+            ---@diagnostic disable-next-line
+            _G.pack
+                or table.pack
+                or function(...) return {n = select('#', ...), ...} end
 
         --endregion Environment
 
@@ -197,13 +206,13 @@ package_path_patch.options =
 
         ---
         --- Debug log for package.path patching block
-        ---@param  msg string
-        ---@vararg     any
-        ---@return     nil
-        local function dbg_log(msg, ...)
-            mp.msg.debug(
-                (#msg > 0
-                    and '[package.path] ' .. string.format(msg, ...))
+        ---@param  message string
+        ---@vararg         any
+        ---@return         nil
+        local function dbg_log(message, ...)
+            msg.debug(
+                (#message > 0
+                    and '[package.path] ' .. tostring(message):format(...))
                     or '[package.path]')
         end
 
@@ -250,7 +259,6 @@ package_path_patch.options =
             return paths
         end
 
-        -- local function package_path_fix()
         (function()
 
             dbg_log('Initial package.path:\n%s', format_package_path())
@@ -264,11 +272,12 @@ package_path_patch.options =
             local mpv_config_dir = (get_mpv_config_dir() or ''):gsub([[\+$]], '')
             if #mpv_config_dir == 0
             then
-                mp.msg.warn(string.format(
-                    '[package.path] Failed to resolve mpv configuration path: (mpv_base?: %s => %s)',
-                    type(mpv_config_dir),
-                    tostring(mpv_config_dir)
-                ))
+                msg.warn(
+                    ('%s Failed to resolve mpv configuration path: (mpv_base?: %s => %s)'):format(
+                        '[package.path]',
+                        type(mpv_config_dir),
+                        tostring(mpv_config_dir)
+                    ))
 
                 return
             end
@@ -341,13 +350,13 @@ package_path_patch.options =
     end
 end)()
 
---endregion Patching
+--endregion package.path Patching
 
 --endregion package.path
 
 --region Imports
 
-local utils = require('mp.utils')
+local utils   = require('mp.utils')
 local options = require('mp.options')
 ---@type assdraw
 local assdraw = require('mp.assdraw')
@@ -464,6 +473,13 @@ local opts = Options.options
 -- Apply user-set options
 options.read_options(opts)
 
+if(opts.font:find('Iosevka'))
+then
+    local orig = mp.get_property_native('msg-level', {})
+    orig['osd/libass'] = 'never'
+    mp.set_property_native('msg-level', orig)
+end
+
 --endregion Initialize Options
 
 --endregion Init
@@ -493,6 +509,11 @@ _G.log_buffer = { }
 ---@type number
 _G.global_margin_y = 0
 _G.buffer_line_max = 100
+---
+--- Used to track input state when navigating history—if repl has been cleared, or not received
+--- a character generally, scrolling through history should not be prefix searched.
+---
+_G.fresh_line = true
 
 --endregion Refactoring to ptty.lua
 
@@ -1765,12 +1786,25 @@ end
 --- A list of generated candidate completion values.
 ---@field public list    CompletionList
 
----
----@class DynCompletionSet: CompletionSetBase
----@field public resolver fun(line: string): CompletionList
-
 ---@alias Completions    CompletionSet[]
 ---@alias CompletionList string[]
+
+---
+--- Can be optionally passed to a completion set function to allow for more targeted completions.
+---
+--- @NOTE: *pos related fields are not 100% determined yet.
+---
+---@class CompletionLocation
+---@field public word     string # Word being completed
+---@field public word_pos number # Cursor position, in word
+---@field public line     string # Full line context
+---@field public pos      number # Cursor position
+
+---
+--- Basic completion list builder function. Optionally takes a CompletionLocation tabel to allow for
+--- more targeted completions.
+---
+---@alias CompletionBuilder fun(state?: CompletionLocation): CompletionList
 
 --region Completion Value Enumeration
 
@@ -1937,7 +1971,69 @@ end
 --- Atm the scanning for loop this guards does work but it needs to be filtered and eventually
 --- resolve subdirectory based scripts.
 ---
-local use_test_hardcoded_path_completions = true
+local use_test_hardcoded_path_completions = false
+
+---
+--- When use_test_hardcoded_path_completions is true, is entire completion set, otherwise used
+--- as base of completion list.
+---
+local path_completions_static =
+{
+    'console', 'playlistmanager'
+}
+
+local path_completion_blacklist =
+{
+    'node_modules',
+    'lib',
+    'dev',
+    'modules',
+    'inactive',
+    '@types',
+    'etc',
+    'notes',
+    'util',
+    'repl', -- lol
+    -- '.init.js',
+    -- '.init.lua',
+    -- '.git',
+}
+
+--- @param  completion_candidate string
+--- @return boolean
+local function path_completion_is_blacklisted_name(completion_candidate)
+    -- Filter out all .*
+    if completion_candidate:match('^[.]')
+    then
+        -- Blacklisted
+        return true
+    end
+    for i, blacklisted in ipairs(path_completion_blacklist)
+    do
+        if blacklisted == completion_candidate
+        then
+            -- Blacklisted
+            return true
+        end
+    end
+
+    -- Valid
+    return false
+end
+
+---
+--- Get extension of file by matching non-dot characters at end of `path_fragment`
+---
+---@param  path_fragment string
+---@return string
+local function get_file_extension(path_fragment)
+    if is.String(path_fragment)
+    then
+        return (path_fragment or ""):match('[^.]+$') or ""
+    else
+        return ""
+    end
+end
 
 ---
 --- Generate list available script paths for `load-script`
@@ -1972,16 +2068,59 @@ local function build_load_script_path_completions()
 
     local path_list = { }
 
-    if use_test_hardcoded_path_completions
+    -- Build initial set for either mode
+    for i, static_path in ipairs(path_completions_static)
+    do
+        path_list[#path_list + 1] = scriptd(static_path)
+    end
+
+    -- Then rest if testing hardcoded paths exclusively not enabled
+    if use_test_hardcoded_path_completions == false
     then
-        path_list[#path_list + 1] = scriptd'console'
-        path_list[#path_list + 1] = scriptd'playlistmanager'
-    else
         if #dirents > 0
         then
-            for i, dirent in ipairs(dirents)
+            for i, child_subpath in ipairs(dirents)
             do
-                path_list[#path_list + 1] = scriptd(dirent)
+                -- @NOTE: Wrapping in function to allow for simulating continue
+                (function(child_path_frag)
+                    log.trace('Processing directory entry for completion: %q', child_path_frag)
+                    -- Filters for regardless of type of file at path
+                    if path_completion_is_blacklisted_name(child_path_frag)
+                    then
+                        return
+                    end
+
+                    local child_path_full = scriptd(child_path_frag)
+                    local ext = get_file_extension(child_path_full)
+                    local info = utils.file_info(expand_path(child_path_full))
+
+                    if not is.Table(info)
+                    then
+                        log.warn('Did not receive table value from utils.file_info for script path completion candidate %q (returned value type: %s)',
+                            child_path_frag,
+                            type(info))
+
+                        return
+                    end
+
+                    -- Case: File
+                    if info.is_file
+                    then
+                        if not ( ext == 'lua' or ext == 'js' )
+                        then
+                            return
+                        end
+                    -- Case: Directory
+                    -- @TODO: Just gonna let them all through for now
+                    elseif info.is_dir
+                    then
+
+                    else
+                        return
+                    end
+
+                    path_list[#path_list + 1] = child_path_full
+                end)(child_subpath)
             end
         end
     end
@@ -2207,27 +2346,33 @@ local function complete()
         _,
         ---@type CompletionSet
         completer
-        in ipairs(build_completers()) do
+        in ipairs(build_completers())
+    do
         -- Completer patterns should return the start and end of the word to be
         -- completed as the first and second capture groups
         local _, _, start_idx, e = before_cur:find(completer.pattern)
-        if not start_idx then
+        if not start_idx
+        then
             -- Multiple input commands can be separated by semicolons, so all
             -- completions that are anchored at the start of the string with
             -- '^' can start from a semicolon as well. Replace ^ with ; and try
             -- to match again.
             _, _, start_idx, e = before_cur:find(completer.pattern:gsub('^^', ';'))
         end
-        if start_idx then
+
+        if start_idx
+        then
             -- If the completer's pattern found a word, check the completer's
             -- list for possible completions
             local part = before_cur:sub(start_idx, e)
             local completed, full = complete_match(part, completer.list)
-            if completed then
+            if completed
+            then
                 -- If there was only one full match from the list, add
                 -- completer.append to the final string. This is normally a
                 -- space or a quotation mark followed by a space.
-                if full and completer.append then
+                if full and completer.append
+                then
                     completed = completed .. completer.append
 
                 -- Else display all partial matches
@@ -2336,8 +2481,8 @@ local function complete()
 
                 -- Insert the completion and update
                 before_cur = before_cur:sub(1, start_idx - 1) .. completed
-                _G.cursor = #before_cur + 1
-                line   = before_cur .. after_cur
+                _G.cursor  = #before_cur + 1
+                _G.line    = before_cur .. after_cur
                 _G.update()
 
                 return
@@ -2368,7 +2513,7 @@ local function paste(clip)
         return
     end
     local before_cur = line:sub(1, _G.cursor - 1)
-    local after_cur = line:sub(_G.cursor)
+    local after_cur  = line:sub(_G.cursor)
     line = before_cur .. text .. after_cur
     _G.cursor = _G.cursor + text:len()
     _G.update()
@@ -2488,23 +2633,23 @@ end
 --region @TODO: Current implementation - replace use with `Input` implementation
 
 function _G.define_key_bindings()
-    if #key_bindings > 0 then return end
+    if #_G.key_bindings > 0 then return end
     for _, bind in ipairs(get_bindings())
     do
         -- Generate arbitrary name for removing the bindings later.
         local name = "_console_" .. (#key_bindings + 1)
-        key_bindings[#key_bindings + 1] = name
+        _G.key_bindings[#key_bindings + 1] = name
         mp.add_forced_key_binding(bind[1], name, bind[2], {repeatable = true})
     end
 
     mp.add_forced_key_binding("any_unicode", "_console_text", text_input,
-        {repeatable = true, complex = true})
+        { repeatable = true, complex = true })
 
-    key_bindings[#key_bindings + 1] = "_console_text"
+    _G.key_bindings[#_G.key_bindings + 1] = "_console_text"
 end
 
 function _G.undefine_key_bindings()
-    for _, name in ipairs(key_bindings)
+    for _, name in ipairs(_G.key_bindings)
     do
         mp.remove_key_binding(name)
     end
@@ -2528,7 +2673,7 @@ local log = logging.Prefix.fmsg('!type', 'debug')
 local function type_script_message(text, immediate)
     log.debug('Entered type script-message handler, calling show_and_type with text:\n"%s"', text)
 
-    show_and_type(typed, immedidate)
+    show_and_type(text, immediate)
 end
 
 script_messages.register('type', type_script_message)
@@ -2553,7 +2698,7 @@ mp.enable_messages('silent:terminal-default')
 
 --region Console Log Filter
 
-local ConsoleLogFilter = require('LogFilter')
+local ConsoleLogFilter = require('log-filter')
 
 --endregion Console Log Filter
 
