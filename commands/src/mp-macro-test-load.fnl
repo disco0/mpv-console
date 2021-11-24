@@ -1,4 +1,4 @@
-(tset (require :fennel) :macro-path "./?.fnl;./?-macros.fnl;./?/init-macros.fnl;./?/init.fnl")
+(tset (require :fennel) :macro-path "./macros/?.fnl;./../macros/?.fnl;./?-macros.fnl;./?/init-macros.fnl;./?/init.fnl")
 
 ;;#region Utils
 
