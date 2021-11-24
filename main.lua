@@ -35,11 +35,10 @@ mpv Package Path Patcher
 
 The following examples use the script directory: `/Users/<User>/.config/mpv/scripts`
 
-An example of package path before and after for a script _file_ in the base script directory (scripts
-loaded as a directory will
+An example of package path before and after for a script _file_ in the base script directory:
 
 ```
-loading file /Users/disk0/.config/mpv/scripts/<script>.lua
+loading file /Users/<user>/.config/mpv/scripts/<script>.lua
 [package.path] Initial package.path:
   /usr/local/Cellar/luajit-openresty/20210510/share/luajit-2.1.0-beta3/?.lua
   /usr/local/share/lua/5.1/?.lua
@@ -333,6 +332,8 @@ local history         = require('history')
 local Perf            = require('perf').Perf
 local is              = require('util.guard').is
 
+local ptty = require('ptty')
+
 --endregion Imports
 
 --region Localize
@@ -433,9 +434,15 @@ options.read_options(opts)
 
 if(opts.font:find('Iosevka'))
 then
-    local orig = mp.get_property_native('msg-level', {})
+    local log = msg.extend('osd/libass')
+    log.debug('Adding osd/libass exception for Iosevka font bug.')
+
+    local orig = mp.get_property_native('msg-level', { })
+    log.debug('Intital native msg-level value: %s', utils.to_string(orig))
+
     orig['osd/libass'] = 'never'
     mp.set_property_native('msg-level', orig)
+    log.debug('Updated native msg-level value: %s', utils.to_string(orig))
 end
 
 --endregion Initialize Options
@@ -447,33 +454,6 @@ end
 --region Forward Declares
 
 _G.handle_enter = nil
-
---endregion Forward Declares
-
---region Refactoring to ptty.lua
-
-local con = { }
-
----@type boolean
-_G.active = false
----@type boolean
-_G.pending_update = false
----@type string
-_G.line = ''
----@type number
-_G.cursor = 1
----@type LogRecord[]
-_G.log_buffer = { }
----@type number
-_G.global_margin_y = 0
-_G.buffer_line_max = 100
----
---- Used to track input state when navigating history—if repl has been cleared, or not received
---- a character generally, scrolling through history should not be prefix searched.
----
-_G.fresh_line = true
-
---endregion Refactoring to ptty.lua
 
 --region Refactoring to history.lua
 
@@ -488,367 +468,60 @@ _G.key_bindings = { }
 ---@type boolean
 _G.insert_mode = false
 
+--endregion Forward Declares
+
+--region (ptty.lua Refactor)
+
+--endregion (ptty.lua Refactor)
+
 _G.update_timer = mp.add_periodic_timer(0.05, function()
-    if _G.pending_update
+    if ptty.pending_update
     then
-        _G.update()
+        ptty.update()
     else
         _G.update_timer:kill()
     end
 end)
 
+_G.update_timer:kill()
+
 --endregion Script Global State
 
-_G.update_timer:kill()
 
 utils.shared_script_property_observe("osc-margins",
   function(_, val)
     if val then
         -- formatted as "%f,%f,%f,%f" with left, right, top, bottom, each
         -- value being the border size as ratio of the window size (0.0-1.0)
-        local vals = {}
+        local vals = { }
         for v in string.gmatch(val, "[^,]+") do
             vals[#vals + 1] = tonumber(v)
         end
-        _G.global_margin_y = vals[4] -- bottom
+        ptty.global_margin_y = vals[4] -- bottom
     else
-        _G.global_margin_y = 0
+        ptty.global_margin_y = 0
     end
-    _G.update()
-  end)
-
---region Console - Output
-
----
---- Basic form of log line entry that
----
----@class LogLine
----@field style string
----@field text  string
-
----
---- Extended form of basic log line that allows for multiple alternating style
---- and text values
----
----@alias DetailedLogLine LogLine[]
-
----
---- All forms of log entries—each counts as one towards the maximum stored
----
----@alias LogRecord LogLine | DetailedLogLine
-
----
---- Append last log entry's text instead of writing a new entry.
----
----@param text   string
----@param update boolean
-function _G.log_edit(text, update)
-    local curr_item = log_buffer[#log_buffer + 1]
-    curr_item.text = curr_item.text .. text
-
-    if type(update) == 'boolean' and update == true
-    then
-        if _G.active
-        then
-            if not _G.update_timer:is_enabled()
-            then
-                _G.update()
-                _G.update_timer:resume()
-            else
-                _G.pending_update = true
-            end
-        end
-    end
-end
-
--- local default_console_color = 'CCCCCC'
----
---- Add a plain line to the log buffer (which is limited to 100 lines, by default)
----
----@param  text  string
----@return       nil
-function _G.log_add_plain(text)
-    table.insert(_G.log_buffer, { style = '', text = text })
-
-    if #_G.log_buffer > _G.buffer_line_max
-    then
-        table.remove(_G.log_buffer, 1)
-    end
-end
-
----
---- Add a line to the log buffer (limited to 100 lines by default)
----
----@param  style  string
----@param  text   string
----@param  defer? boolean
----@return        nil
-function _G.log_add(style, text, defer)
-    table.insert(_G.log_buffer, { style = style, text = text })
-
-    if #_G.log_buffer > _G.buffer_line_max
-    then
-        -- @NOTE: If this code gets reworked/used for a general, multi-buffer entry case make sure
-        --        to also handle the removals correctly (e.g. not hardcoded to 1)
-        table.remove(_G.log_buffer, 1)
-    end
-
-    if defer == true or not _G.active then return end
-
-    if not _G.update_timer:is_enabled()
-    then
-        _G.update()
-        _G.update_timer:resume()
-    else
-        _G.pending_update = true
-    end
-end
-
----
---- Add a new line to the log buffer using extended styling
----
----@param  entry DetailedLogLine
----@param  wait  boolean | nil
----@return       nil
-function _G.log_add_advanced(entry, wait)
-    table.insert(_G.log_buffer, entry)
-
-    if #_G.log_buffer >  _G.buffer_line_max
-    then
-        table.remove(_G.log_buffer, 1)
-    end
-
-    if wait == true
-    then
-        -- no-redraw
-    elseif _G.active
-    then
-        if not _G.update_timer:is_enabled()
-        then
-            _G.update()
-            _G.update_timer:resume()
-        else
-            _G.pending_update = true
-        end
-    end
-end
-
---- Stores common LogLine fragments, for use with `log_add_advanced`.
-local LOG_FRAGMENT =
-{
-    NEW_LINE = { text = "\n", style = "" }
-}
-
---- Empty the log buffer of all messages (`Ctrl+l`)
-local function clear_log_buffer()
-    _G.log_buffer = {}
-    _G.update()
-end
-
---region Util
-
--- (Defines unimplemented escaping control for output subs)
----@class AssEscapeOptions
----@field slash         boolean?
----@field brackets      boolean?
----@field newline       boolean?
----@field leading_space boolean?
-
-local ASS_CHAR =
-{
-    -- Zero-width non-breaking space
-    ZWNBSP      = '\239\187\191',
-    NEW_LINE    = '\\N',
-    HARD_SPACE  = '\\h'
-}
-
----
---- Escape a string `str` for verbatim display on the OSD
----
----@param  str        string
----@param  no_escape? boolean
----@return            string
-local function ass_escape(str, no_escape)
-
-    local disable = type(no_escape) == "table" and no_escape or { }
-
-    ---@type string
-    local str = str or ''
-
-    -- There is no escape for '\' in ASS (I think?) but '\' is used verbatim if
-    -- it isn't followed by a recognised character, so add a zero-width
-    -- non-breaking space
-    -- str = str:gsub('\\', '\\\239\187\191')
-    str = str:gsub('\\', '\\' .. ASS_CHAR.ZWNBSP)
-    str = str:gsub('{', '\\{')
-    str = str:gsub('}', '\\}')
-
-    -- Precede newlines with a ZWNBSP to prevent ASS's weird collapsing of
-    -- consecutive newlines
-    -- str = str:gsub('\n', '\239\187\191\\N')
-    str = str:gsub('\n', ASS_CHAR.ZWNBSP .. ASS_CHAR.NEW_LINE)
-
-    -- Turn leading spaces into hard spaces to prevent ASS from stripping them
-    str = str:gsub('\\N ', '\\N\\h') -- What is this for specifically? (????)
-    str = str:gsub('^ ', ASS_CHAR.HARD_SPACE)
-
-    return str
-end
-
---endregion Util
-
---endregion Console - Output
-
--- Render the Console and console as an ASS OSD
-function _G.update()
-    _G.pending_update = false
-
-    local dpi_scale = mp.get_property_native("display-hidpi-scale", 1.0)
-
-    dpi_scale = dpi_scale * opts.scale
-
-    local screenx, screeny, aspect = mp.get_osd_size()
-    screenx = screenx / dpi_scale
-    screeny = screeny / dpi_scale
-
-    -- Clear the OSD if the Console is not active
-    if not active
-    then
-        mp.set_osd_ass(screenx, screeny, '')
-        return
-    end
-
-    local ass = assdraw.ass_new()
-    local style = format(
-        '{\\r\\1a&H00&\\3a&H00&\\4a&H99&\\1c&H%s&\\3c&H111111&\\4c&H000000&\\fn%s\\fs%s\\bord1\\xshad0\\yshad1\\fsp0\\q1}',
-        'EEEEEE',
-        opts.font,
-        opts.font_size
-    )
-
-    -- Create the cursor glyph as an ASS drawing. ASS will draw the cursor
-    -- inline with the surrounding text, but it sets the advance to the width
-    -- of the drawing. So the cursor doesn't affect layout too much, make it as
-    -- thin as possible and make it appear to be 1px wide by giving it 0.5px
-    -- horizontal borders.
-    local cursor_height = opts.font_size * 8
-    local cursor_glyph = format(
-        '{\\r\\1a&H44&\\3a&H44&\\4a&H99&\\1c&H%s&\\3c&Heeeeee&\\4c&H000000&\\xbord0.5\\ybord0\\xshad0\\yshad1\\p4\\pbo24}m 0 0 l 1 0 l 1 %s l 0 %s{\\p0}',
-        'EEEEEE',
-        cursor_height,
-        cursor_height
-    )
-    local before_cur = ass_escape(_G.line:sub(1, cursor - 1))
-    local after_cur  = ass_escape(_G.line:sub(_G.cursor))
-
-    -- Render log messages as ASS. This will render at most screeny / font_size messages.
-    local log_ass = ''
-    -- @NOTE: math.ceil only takes one arg?
-    local viewable_log_message_count = math.min(#_G.log_buffer, math.ceil(screeny / opts.font_size))
-
-    -- @TODO: Return escaped string to position in line/node buffer and allow the now semi-memoized
-    --        value to be passed through again instead of repeatedly processing it. This effectively
-    --        adds a third kind of log buffer entry type, the (rendered) string
-    --
-
-    ---@param node table<'text' | 'style', string>
-    local function process_buffer_node(node)
-        log_ass = string.format('%s%s%s%s', log_ass, style, node.style or '', ass_escape(node.text))
-    end
-
-    for i = #log_buffer - viewable_log_message_count + 1, #log_buffer
-    do
-        -- Initial plan was going to be determining basic and extended buffer by checking for
-        -- text/style table values, followed by an index value and a fallthrough (error) case,
-        -- allowing for adding additional cases—if performance is an issue just check for index
-        -- key, and assume its basic by default (and deal with new alternates when we get there)
-
-        --
-        -- Now have additionally learned that lua literally stores a single reference to any
-        -- string used in the program—memoizing this, or possibly just leaning on the
-        -- implementation's string storage totality store formatted lines instead of rerendering
-        -- them (if that's even actually being done, have to look at this again)
-        --
-
-        -- Regular line: Check if item has style / text key
-        if type(log_buffer[i].text) == 'string'
-        then
-            process_buffer_node(log_buffer[i])
-
-        -- Detailed line: Check for array indicies
-        elseif type(log_buffer[i][1]) == 'table'
-        then
-            local j = 1
-            local curr = log_buffer[i][j]
-            while curr ~= nil
-            do
-                process_buffer_node(log_buffer[i][j])
-                j = j + 1
-                curr = log_buffer[i][j]
-            end
-        else
-            -- Unknown: Explode
-            error('[update] Failed to determine type of log entry.')
-        end
-    end
-
-    ass:new_event()
-    ass:an(1)
-    ass:pos(2, screeny - 2 - global_margin_y * screeny)
-    ass:append(log_ass .. ASS_CHAR.NEW_LINE)
-
-    -- Just content after initial style content of each section–still requires prepending style,
-    -- or style + alpha for cursor pass
-    -- @NOTE: Special case for drawing history position—if position is one over the history
-    --        entry total, assume its the active input buffer, and don't draw.
-    local prompt_before_body = style .. '> ' .. before_cur
-    if opts.prompt_hist_pos == true and (_G.history_pos ~= #_G.history_orig + 1)
-    then
-        local hist_len = #_G.history_orig
-        local pad_num = tostring(tostring(hist_len):len())
-        prompt_before_body = format(
-            '[%s/%s] > %s',
-            tostring(math.max(0, _G.history_pos)):pad_left(pad_num, '0'),
-            tostring(#_G.history_orig):pad_left(pad_num, '0'),
-            before_cur
-        )
-    end
-    local prompt_after_body = after_cur
-
-    ass:append(style .. prompt_before_body)
-    ass:append(cursor_glyph)
-    ass:append(style .. prompt_after_body)
-
-    -- Redraw the cursor with the REPL text invisible. This will make the
-    -- cursor appear in front of the text.
-    ass:new_event()
-    ass:an(1)
-    ass:pos(2, screeny - 2 - global_margin_y * screeny)
-    ass:append(style .. '{\\alpha&HFF&}' .. prompt_before_body)
-    ass:append(cursor_glyph)
-    ass:append(style .. '{\\alpha&HFF&}' .. prompt_after_body)
-
-    mp.set_osd_ass(screenx, screeny, ass.text)
-end
+    ptty.update()
+end)
 
 -- Set the Console visibility ("enable", Esc)
 ---@param active? boolean
 local function set_active(active)
-    if active == _G.active then return end
+    if active == ptty.active then return end
     if active
     then
-        _G.active = true
-        _G.insert_mode    = false
+        ptty.active      = true
+        _G.insert_mode = false
         mp.enable_key_bindings('console-input', 'allow-hide-cursor+allow-vo-dragging')
         mp.enable_messages('terminal-default')
         _G.define_key_bindings()
     else
-        _G.active = false
+        ptty.active = false
         _G.undefine_key_bindings()
         mp.enable_messages('silent:terminal-default')
         collectgarbage()
     end
-    _G.update()
+    ptty.update()
 end
 
 local log = msg.extend('show_and_type')
@@ -868,20 +541,20 @@ local function show_and_type(text, eval_immediately)
     end
 
     -- Save the line currently being edited, just in case
-    if #_G.line ~= text
-       and _G.line ~= ''
-       -- and history.last ~= _G.line
+    if #ptty.line ~= text
+       and ptty.line ~= ''
+       -- and history.last ~= ptty.line
        and ((#_G.history_orig < 1)
              or
-            (_G.history_orig[#_G.history_orig] ~= _G.line))
+            (_G.history_orig[#_G.history_orig] ~= ptty.line))
     then
         log.debug('Saving current line to history before possibly clearing.')
-        -- history:add(_G.line)
-        _G.history_orig[#_G.history_orig + 1] = _G.line
+        -- history:add(ptty.line)
+        _G.history_orig[#_G.history_orig + 1] = ptty.line
     end
 
-    _G.line = text
-    _G.cursor = _G.line:len() + 1
+    ptty.line = text
+    ptty.cursor = ptty.line:len() + 1
     _G.history_pos = #_G.history_orig + 1
     _G.insert_mode = false
 
@@ -893,10 +566,10 @@ local function show_and_type(text, eval_immediately)
         _G.handle_enter()
     end
 
-    if _G.active
+    if ptty.active
     then
         log.debug('Console is active, calling global update function.')
-        _G.update()
+        ptty.update()
     else
         log.debug('Making console active.')
         set_active(true)
@@ -946,7 +619,7 @@ end
 
 --- Close the console if the current line is empty, otherwise do nothing (Ctrl+D)
 local function close_console_if_empty()
-    if _G.line == ''
+    if ptty.line == ''
     then
         set_active(false)
     end
@@ -983,7 +656,7 @@ local function help_command(param)
         end
         if not cmd
         then
-            _G.log_add(error_style, 'No command matches "' .. param .. '"!')
+            ptty.log_add(error_style, 'No command matches "' .. param .. '"!')
             return
         end
         output = output .. 'Command "' .. cmd.name .. '"\n'
@@ -1001,7 +674,7 @@ local function help_command(param)
             output = output .. 'This command supports variable arguments.\n'
         end
     end
-    _G.log_add('', output)
+    ptty.log_add('', output)
 end
 
 --region Modded Help
@@ -1068,14 +741,10 @@ local function help_command_extended(param)
             output = output  .. '  ' .. cmd.name
         end
 
-        output = format('%s%s%s%s',
-            output, '\n',
-            'Use "help command" to show information about a command.\n',
-            "ESC or Ctrl+d exits the console.\n"
-        )
-        -- output = output .. '\n'
-        -- output = output .. 'Use "help command" to show information about a command.\n'
-        -- output = output .. "ESC or Ctrl+d exits the console.\n"
+        output = format('%s\n%s\n%s\n',
+            output,
+            'Use "help command" to show information about a command.',
+            "ESC or Ctrl+d exits the console.")
     else
         ---@type CommandInfo | nil
         local cmd = nil
@@ -1092,7 +761,7 @@ local function help_command_extended(param)
         end
         if not cmd
         then
-            _G.log_add(error_style, 'No command matches "' .. param .. '"!')
+            ptty.log_add(error_style, 'No command matches "' .. param .. '"!')
             return
         end
         output = output .. 'Command "' .. cmd.name .. '"\n'
@@ -1111,7 +780,7 @@ local function help_command_extended(param)
         end
     end
 
-    _G.log_add('', output)
+    ptty.log_add('', output)
 end
 
 script_messages.register('help', help_command_extended)
@@ -1137,7 +806,7 @@ end
 script_messages.register('mem', function()
     -- Record fresh sample
     Perf.record('mem script-message call')
-    _G.log_add_advanced({
+    M.log_add_advanced({
         {
             style = "{\\1c&HCCCCCC&}",
             text = string.format('Memory Usage: %s', format_perf_memory(Perf.last.memory))
@@ -1224,13 +893,13 @@ local function handle_char_input(c)
 
     if _G.insert_mode == true
     then
-        _G.line = _G.line:sub(1, _G.cursor - 1) .. c .. _G.line:sub(next_utf8(_G.line, _G.cursor))
+        ptty.line = ptty.line:sub(1, ptty.cursor - 1) .. c .. ptty.line:sub(next_utf8(ptty.line, ptty.cursor))
     else
-        _G.line = _G.line:sub(1, _G.cursor - 1) .. c .. _G.line:sub(_G.cursor)
+        ptty.line = ptty.line:sub(1, ptty.cursor - 1) .. c .. ptty.line:sub(ptty.cursor)
     end
 
-    _G.cursor = _G.cursor + #c
-    _G.update()
+    ptty.cursor = ptty.cursor + #c
+    ptty.update()
 end
 
 --- Process keyboard input event (??)
@@ -1247,20 +916,20 @@ end
 
 --- Remove the character behind the cursor (Backspace)
 local function handle_backspace()
-    if _G.cursor <= 1 then return end
+    if ptty.cursor <= 1 then return end
 
-    local prev = prev_utf8(_G.line, cursor)
-    _G.line = _G.line:sub(1, prev - 1) .. _G.line:sub(cursor)
-    _G.cursor = prev
-    _G.update()
+    local prev = prev_utf8(ptty.line, ptty.cursor)
+    ptty.line = ptty.line:sub(1, prev - 1) .. ptty.line:sub(ptty.cursor)
+    ptty.cursor = prev
+    ptty.update()
 end
 
 --- Remove the character in front of the cursor (Del)
 local function handle_del()
-    if _G.cursor > _G.line:len() then return end
-    _G.line = _G.line:sub(1, _G.cursor - 1)
-                .. _G.line:sub(next_utf8(_G.line, _G.cursor))
-    _G.update()
+    if ptty.cursor > ptty.line:len() then return end
+    ptty.line = ptty.line:sub(1, ptty.cursor - 1)
+                .. ptty.line:sub(next_utf8(ptty.line, ptty.cursor))
+    ptty.update()
 end
 
 --- Toggle insert mode (Ins)
@@ -1269,36 +938,36 @@ local function handle_ins()
 end
 
 --- Clear the current line (Ctrl+C)
-local function clear()
-    _G.line        = ''
-    _G.cursor      = 1
+local function clear_input()
+    ptty.line        = ''
+    ptty.cursor      = 1
     _G.insert_mode = false
     _G.history_pos = #_G.history_orig + 1
-    _G.update()
+    ptty.update()
 end
 
 --- Delete from the cursor to the end of the word (Ctrl+W)
 function _G.del_word()
-    local before_cur = _G.line:sub(1, _G.cursor - 1)
-    local after_cur = _G.line:sub(_G.cursor)
+    local before_cur = ptty.line:sub(1, ptty.cursor - 1)
+    local after_cur = ptty.line:sub(ptty.cursor)
 
     before_cur = before_cur:gsub('[^%s]+%s*$', '', 1)
-    _G.line = before_cur .. after_cur
-    _G.cursor = before_cur:len() + 1
-    _G.update()
+    ptty.line = before_cur .. after_cur
+    ptty.cursor = before_cur:len() + 1
+    ptty.update()
 end
 
 --- Delete from the cursor to the end of the line (Ctrl+K)
 function _G.del_to_eol()
-    _G.line = _G.line:sub(1, _G.cursor - 1)
-    _G.update()
+    ptty.line = ptty.line:sub(1, ptty.cursor - 1)
+    ptty.update()
 end
 
 --- Delete from the cursor back to the start of the line (Ctrl+U)
 function _G.del_to_start()
-    _G.line = _G.line:sub(_G.cursor)
-    _G.cursor = 1
-    _G.update()
+    ptty.line = ptty.line:sub(ptty.cursor)
+    ptty.cursor = 1
+    ptty.update()
 end
 
 --endregion Line Editing
@@ -1349,31 +1018,31 @@ local function go_history(new_pos, no_update)
     -- entry. This makes it much less frustrating to accidentally hit Up/Down
     -- while editing a line.
     if old_pos == history_len + 1
-        and _G.line                      ~= ''
-        and _G.history_orig[history_len] ~= _G.line
+        and ptty.line                    ~= ''
+        and _G.history_orig[history_len] ~= ptty.line
     then
         -- As long as history length stored locally this needs to be updated
         history_len = history_len + 1
         log.debug("Current line buffer appears to be unrecorded, adding a history state before clearing.")
         -- Length value updated before use, so increment unecessary
-        _G.history_orig[history_len] = _G.line
+        _G.history_orig[history_len] = ptty.line
     end
 
     -- Now show the history line (or a blank line for #history_orig + 1)
     if new_pos <= history_len
     then
-        _G.line = _G.history_orig[new_pos]
+        ptty.line = _G.history_orig[new_pos]
     else
         log.debug('Reached end of history, presenting fresh line.')
-        _G.line = ''
+        ptty.line = ''
     end
 
-    _G.cursor = _G.line:len() + 1
+    ptty.cursor = ptty.line:len() + 1
     _G.insert_mode = false
     -- Correct?
     _G.history_pos = new_pos
     log.debug('New history position: %i/%i', new_pos, history_len)
-    _G.update()
+    ptty.update()
 end
 
 --- Go to the specified relative position in the command history (Up, Down)
@@ -1394,8 +1063,8 @@ local function go_history_prefix_backward(line, increment_on_failure)
 
     if type(line) ~= 'string'
     then
-        line = _G.line
-        hlogb.debug('Defaulting to current line as search prefix: «%s»', _G.line)
+        line = ptty.line
+        hlogb.debug('Defaulting to current line as search prefix: «%s»', ptty.line)
     end
 
     if type(increment_on_failure) ~= 'boolean'
@@ -1463,8 +1132,8 @@ local function go_history_prefix_forward(line, increment_on_failure)
     -- Condition only for debugging
     if not is.String(line)
     then
-        line = _G.line
-        hlogf.debug('Defaulting to current line as search prefix: «%s»', _G.line)
+        line = ptty.line
+        hlogf.debug('Defaulting to current line as search prefix: «%s»', ptty.line)
     end
 
     if not is.Boolean(increment_on_failure)
@@ -1546,7 +1215,7 @@ local log = msg.extend('handle_enter')
 --- Run the current command and clear the line (Enter)
 ---
 _G.handle_enter = function()
-    local line_init = _G.line
+    local line_init = ptty.line
     local line_proc = line_init
     log.debug('Console line content at time of enter handle: "%s"', line_init)
 
@@ -1582,11 +1251,11 @@ _G.handle_enter = function()
     --      dedicated to any additional processing
     -- match "help [<text>]", return <text> or "", strip all whitespace
     local matched_help =
-        _G.line:match('^%s*help%s+(.-)%s*$')
-            or (_G.line:match('^%s*help$')        and '')
+        ptty.line:match('^%s*help%s+(.-)%s*$')
+            or (ptty.line:match('^%s*help$')        and '')
     local matched_help_mod =
-        _G.line:match('^%s*help[_-]mod%s+(.-)%s*$')
-            or (_G.line:match('^%s*help[_-]mod$') and '')
+        ptty.line:match('^%s*help[_-]mod%s+(.-)%s*$')
+            or (ptty.line:match('^%s*help[_-]mod$') and '')
 
     if matched_help_mod
     then
@@ -1634,12 +1303,12 @@ _G.handle_enter = function()
             return
         end
 
-        _G.log_add('{\\1c&H99cc99&}', '  $ ' .. processed_line .. "\n")
+        ptty.log_add('{\\1c&H99cc99&}', '  $ ' .. processed_line .. "\n")
         mp.command(processed_line)
     end
     --endregion Command Processing
 
-    clear()
+    clear_input()
 end
 
 --endregion Key Handlers
@@ -1652,42 +1321,42 @@ end
 --- string in order to do a "backwards" find. This wouldn't be as annoying
 --- to do if Lua didn't insist on 1-based indexing.
 function _G.prev_word()
-    _G.cursor =
-        _G.line:len()
-            - select(2, _G.line:reverse():find('%s*[^%s]*', _G.line:len() - _G.cursor + 2))
+    ptty.cursor =
+        ptty.line:len()
+            - select(2, ptty.line:reverse():find('%s*[^%s]*', ptty.line:len() - ptty.cursor + 2))
             + 1
-    _G.update()
+    ptty.update()
 end
 
 -- Move to the end of the current word, or if already at the end, the end of
 -- the next word. (Ctrl+Right)
 function _G.next_word()
-    _G.cursor = select(2, _G.line:find('%s*[^%s]*', _G.cursor)) + 1
-    _G.update()
+    ptty.cursor = select(2, ptty.line:find('%s*[^%s]*', ptty.cursor)) + 1
+    ptty.update()
 end
 
 -- Move the cursor to the next character (Right)
 function _G.next_char(amount)
-    _G.cursor = next_utf8(_G.line, _G.cursor)
-    _G.update()
+    ptty.cursor = next_utf8(ptty.line, ptty.cursor)
+    ptty.update()
 end
 
 -- Move the cursor to the previous character (Left)
 function _G.prev_char(amount)
-    _G.cursor = prev_utf8(_G.line, _G.cursor)
-    _G.update()
+    ptty.cursor = prev_utf8(ptty.line, ptty.cursor)
+    ptty.update()
 end
 
 -- Move the cursor to the beginning of the line (HOME)
 function _G.go_home()
-    _G.cursor = 1
-    _G.update()
+    ptty.cursor = 1
+    ptty.update()
 end
 
 -- Move the cursor to the end of the line (END)
 function _G.go_end()
-    _G.cursor = _G.line:len() + 1
-    _G.update()
+    ptty.cursor = ptty.line:len() + 1
+    ptty.update()
 end
 
 --endregion Line Navigation
@@ -1796,7 +1465,7 @@ local function build_profile_completions()
         then
             profile_completions[#profile_completions + 1] = profile.name
         else
-            log.warn('[profiles]  [Entry in profile list missing name]')
+            log.warn('[profiles] [Entry in profile list missing name]')
         end
     end
 
@@ -1975,7 +1644,8 @@ local function build_load_script_path_completions()
     if type(mpv_home) ~= "string" or #mpv_home < 1 then return { } end
 
     local mpv_script_dir = utils.join_path(mpv_home, "scripts")
-    log.trace('[paths] reading entries in script dir: "' .. mpv_script_dir .. '"')
+    -- @NOTE: Disabled to avoid overflow
+    -- log.trace('[paths] reading entries in script dir: "' .. mpv_script_dir .. '"')
     local dirents, readdir_err = utils.readdir(mpv_script_dir)
     if type(readdir_err) ~= "nil"
     then
@@ -1991,7 +1661,8 @@ local function build_load_script_path_completions()
     ---@return      string
     local function scriptd(leaf)
         local joined = utils.join_path(script_dir_prefix, leaf)
-        log.trace('[paths] [scriptd] Generated completion: "' .. joined .. '"')
+        -- @NOTE: Disabled to avoid overflow
+        -- log.trace('[paths] [scriptd] Generated completion: "' .. joined .. '"')
         return joined
     end
 
@@ -2012,7 +1683,9 @@ local function build_load_script_path_completions()
             do
                 -- @NOTE: Wrapping in function to allow for simulating continue
                 (function(child_path_frag)
-                    log.trace('Processing directory entry for completion: %q', child_path_frag)
+                    -- @NOTE: Disabled to avoid overflow
+                    -- log.trace('Processing directory entry for completion: %q', child_path_frag)
+
                     -- Filters for regardless of type of file at path
                     if path_completion_is_blacklisted_name(child_path_frag)
                     then
@@ -2267,9 +1940,9 @@ local log = msg.extend('complete')
 -- Complete the option or property at the cursor (TAB)
 local function complete()
     ---@type string
-    local before_cur = line:sub(1, _G.cursor - 1)
+    local before_cur = ptty.line:sub(1, ptty.cursor - 1)
     ---@type string
-    local after_cur = line:sub(_G.cursor)
+    local after_cur = ptty.line:sub(ptty.cursor)
 
     -- If line is empty or cursor is immediately proceeding a statement
     -- terminating `;` then just complete commands
@@ -2362,8 +2035,8 @@ local function complete()
 
                         -- Add heading to completion list
                         -- @TODO: Why doesn't this work?
-                        _G.log_add(comp_header_style, 'Completions:')
-                        -- _G.log_add('', "\n")
+                        ptty.log_add(comp_header_style, 'Completions:')
+                        -- ptty.log_add('', "\n")
 
                         local pad_amount = 18
 
@@ -2391,7 +2064,7 @@ local function complete()
                             curr = curr .. partial:pad_right(pad_amount, ' ')
                             if idx >= last_idx
                             then
-                                _G.log_add(comp_style, '\n' .. curr)
+                                ptty.log_add(comp_style, '\n' .. curr)
                                 curr = ''
                                 idx = 0
                             end
@@ -2403,9 +2076,9 @@ local function complete()
                         -- logged yet
                         if #curr > 0
                         then
-                            _G.log_add(comp_style,   '\n' .. curr .. '\n')
+                            ptty.log_add(comp_style,   '\n' .. curr .. '\n')
                         else
-                            _G.log_add('', "\n\n")
+                            ptty.log_add('', "\n\n")
                         end
 
                         -- Always add eol
@@ -2414,9 +2087,9 @@ local function complete()
 
                 -- Insert the completion and update
                 before_cur = before_cur:sub(1, start_idx - 1) .. completed
-                _G.cursor  = #before_cur + 1
-                _G.line    = before_cur .. after_cur
-                _G.update()
+                ptty.cursor  = #before_cur + 1
+                ptty.line    = before_cur .. after_cur
+                ptty.update()
 
                 return
             end
@@ -2445,11 +2118,11 @@ local function paste(clip)
 
         return
     end
-    local before_cur = line:sub(1, _G.cursor - 1)
-    local after_cur  = line:sub(_G.cursor)
-    line = before_cur .. text .. after_cur
-    _G.cursor = _G.cursor + text:len()
-    _G.update()
+    local before_cur = ptty.line:sub(1, ptty.cursor - 1)
+    local after_cur  = ptty.line:sub(ptty.cursor)
+    ptty.line = before_cur .. text .. after_cur
+    ptty.cursor = ptty.cursor + text:len()
+    ptty.update()
 end
 
 --endregion Clipboard Access
@@ -2497,7 +2170,7 @@ local function get_bindings()
         { 'end',         _G.go_end                              },
         { 'pgup',        _G.handle_pgup                         },
         { 'pgdwn',       _G.handle_pgdown                       },
-        { 'ctrl+c',      clear                                  },
+        { 'ctrl+c',      clear_input                                  },
         { 'ctrl+d',      close_console_if_empty                 },
         { 'ctrl+k',      _G.del_to_eol                             },
         { 'ctrl+l',      clear_log_buffer                       },
@@ -2661,7 +2334,7 @@ local function ingest_log_message(e)
         style = '{\\1c&H5791f9&\\b1}'
     end
 
-    _G.log_add(style, '[' .. e.prefix .. '] ' .. e.text)
+    ptty.log_add(style, '[' .. e.prefix .. '] ' .. e.text)
 end
 
 mp.register_event('log-message', ingest_log_message)
@@ -2677,7 +2350,7 @@ collectgarbage()
 --region Post-init
 
 -- Prompt that alternate console script loaded
-_G.log_add('{\\1c&H22CC00&\\b1}', 'Extended console loaded.\n')
+ptty.log_add('{\\1c&H22CC00&\\b1}', 'Extended console loaded.\n')
 Perf.record('post-init')
 
 --endregion Post-init

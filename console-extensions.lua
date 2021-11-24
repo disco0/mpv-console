@@ -20,6 +20,8 @@ local macro   = require('console.macros')
 local default_macro_table_factory = macro.util.defaults.get_default_macros
 local script_messages = require('script-message-tracker')
 
+local ptty    = require('ptty')
+
 --endregion Imports
 
 --region Declarations
@@ -145,7 +147,7 @@ local function print_line(line)
             mp.command(([[print-text "\"%s\" %s ${%s}"]]):format(w, proc_arrow, w))
         end
     end
-    _G.update()
+    ptty.update()
 end
 
 ---
@@ -175,7 +177,7 @@ local function print_prop_type(str, default_value)
             mp.command(cmd)
         end
     end
-    _G.update()
+    ptty.update()
 end
 
 local gt_log = msg.extend('get_type')
@@ -232,11 +234,11 @@ local function cycle_line(line)
                 local cmd = "print-text \"" .. w .. " " .. proc_arrow .. " ${" .. w .. "}\" "
                 mp.command(cmd)
             else
-                _G.log_add('{\\1c&H66ccff&}', w .. " != Bool\n")
+                ptty.log_add('{\\1c&H66ccff&}', w .. " != Bool\n")
             end
         end
     end
-    _G.update()
+    ptty.update()
 end
 
 ---
@@ -257,7 +259,7 @@ local function cons_line(prefix, line, postfix)
         end)
         _G.prev_char(postfix.len)
     end
-    _G.update()
+    ptty.update()
 end
 
 --endregion Macros
@@ -293,7 +295,7 @@ local function eval_line(line)
                 end
             end
         end
-        _G.update()
+        ptty.update()
         return statements
     end
 
@@ -379,13 +381,13 @@ local function preprocess_line(_line)
     if is.String(_line)
     then
         log.warn('line parameter passed into eval_line is not a string, using global line value as a fallback.')
-        if type(_G.line) ~= "string"
+        if type(ptty.line) ~= "string"
         then
-            log.warn('Global line state (_G.line) also is not of string type.')
+            log.warn('Global line state (ptty.line) also is not of string type.')
         end
     end
 
-    -- local line_init = type(_line) == "string" and _line or _G.line
+    -- local line_init = type(_line) == "string" and _line or ptty.line
 
     local e_log = Prefix.fmsg('Line Eval')
     local dbg,         dbg_err,     warn  =
@@ -414,7 +416,7 @@ local function preprocess_line(_line)
                 end
             end
         end
-        -- _G.update()
+        -- ptty.update()
         Prefix.fmsg_method('parse_statements', 'trace')('Parsed %i statements.', #statements)
         return statements
     end
@@ -748,7 +750,7 @@ local function capture_af_help_output()
 end
 
 local function print_af_help()
-    _G.log_add('', tostring(capture_af_help_output()))
+    ptty.log_add('', tostring(capture_af_help_output()))
 end
 
 script_messages.register('get-af-help', print_af_help)
@@ -840,7 +842,7 @@ local function print_macros(first, ...)
     end
 
     -- Update repl on completion
-    _G.update()
+    ptty.update()
 end
 
 script_messages.register('macros',  print_macros)
@@ -963,7 +965,7 @@ end
 ---
 local function get_console_font_size()
     log_get_set(("Console font size: %s\n"):format(opts.font_size))
-    _G.update()
+    ptty.update()
 end
 
 local console_font_size_interval = 1
@@ -994,7 +996,7 @@ local function set_console_font_size(text)
 
     end
 
-    _G.update()
+    ptty.update()
 end
 
 script_messages.register('get-console-size', get_console_font_size)
@@ -1014,7 +1016,7 @@ end)
 ---
 local function show_console_font_name()
     log_get_set(string.format("Console font: %s\n", opts.font))
-    _G.update()
+    ptty.update()
 end
 
 ---
@@ -1023,7 +1025,7 @@ end
 local function set_console_font_name(text)
     opts.font = text or opts.font
     log_get_set(string.format("Console font: %s\n", opts.font))
-    _G.update()
+    ptty.update()
 end
 
 script_messages.register('get-console-font', show_console_font_name)
