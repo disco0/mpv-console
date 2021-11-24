@@ -70,7 +70,6 @@ local package_path_patch = { }
 ---@param path string
 ---@return string expanded_path
 local function expand_path(path)
-    -- TODO: Properly handle metatable resolved string content?
     assert((type(path) == 'string' and #path > 0),
         '`path` parameter is a string of non-zero length.')
 
@@ -98,45 +97,7 @@ end
 
 --endregion package.path Pretty Print
 
---region get_mpv_config_dir
-
---- Resolves user mpv config path, checking the following environment variables (in order):
----
---- `MPV_HOME`: `$MPV_HOME/`
----
---- `XDG_CONFIG_HOME`: `$XDG_CONFIG_HOME/mpv/`
----
---- `HOME`: `$HOME/.config/mpv/`
----
 local get_mpv_config_dir = function() return expand_path('~~/') end
-
---[[ -- Overthinking this, restore if this is really used that much/is actually slow
-    ---
-    --- `MPV_HOME`: `$MPV_HOME/`
-    ---
-    --- `XDG_CONFIG_HOME`: `$XDG_CONFIG_HOME/mpv/`
-    ---
-    --- `HOME`: `$HOME/.config/mpv/`
-    ---
-    (function()
-        ---@type string
-        local resolved_mpv_config_dir = nil
-
-        --- @param  no_cache boolean | nil
-        --- @return          string  | nil
-        return function(no_cache)
-            if type(resolved_mpv_config_dir) == "string" and #resolved_mpv_config_dir > 0
-            then
-                return resolved_mpv_config_dir
-            else
-                resolved_mpv_config_dir = expand_path(mpv_config_dir_short)
-                if resolved_mpv_config_dir then return resolved_mpv_config_dir end
-            end
-        end
-    end)()
-]]--
-
---endregion get_mpv_config_dir
 
 --region Configuration
 
@@ -344,8 +305,6 @@ package_path_patch.options =
             _G.package.path = table.concat(package_paths, ';')
 
             dbg_log('Updated package.path:\n%s', format_package_path())
-
-            return
         end)()
     end
 end)()
@@ -365,15 +324,14 @@ local logging = require('log-ext')
 local Prefix = logging.Prefix
 local msg    = logging.msg
 
-require('builtin-extensions-global') -- 'console-builtin-extensions'
+require('builtin-extensions-global')
 local Const           = require('constants')
 local Options         = require('console-options')
 local script_messages = require('script-message-tracker')
 local console_ext     = require('console-extensions')
 local history         = require('history')
 local Perf            = require('perf').Perf
-
-local is = require('util.guard').is
+local is              = require('util.guard').is
 
 --endregion Imports
 
@@ -610,8 +568,6 @@ end
 ---@param  text  string
 ---@return       nil
 function _G.log_add_plain(text)
-    -- _G.log_buffer[#_G.log_buffer + 1] = { style = '', text = text }
-    -- imperceptibly lower perf than [#tbl + 1], not as painful to look at
     table.insert(_G.log_buffer, { style = '', text = text })
 
     if #_G.log_buffer > _G.buffer_line_max
@@ -628,7 +584,6 @@ end
 ---@param  defer? boolean
 ---@return        nil
 function _G.log_add(style, text, defer)
-    -- _G.log_buffer[#_G.log_buffer + 1] = { style = style, text = text }
     table.insert(_G.log_buffer, { style = style, text = text })
 
     if #_G.log_buffer > _G.buffer_line_max
@@ -656,7 +611,6 @@ end
 ---@param  wait  boolean | nil
 ---@return       nil
 function _G.log_add_advanced(entry, wait)
-    -- _G.log_buffer[#_G.log_buffer + 1] = entry -- { style = style, text = text }
     table.insert(_G.log_buffer, entry)
 
     if #_G.log_buffer >  _G.buffer_line_max
@@ -705,14 +659,15 @@ local ASS_CHAR =
     -- Zero-width non-breaking space
     ZWNBSP      = '\239\187\191',
     NEW_LINE    = '\\N',
-    HARD_SPACE = '\\h'
+    HARD_SPACE  = '\\h'
 }
 
 ---
 --- Escape a string `str` for verbatim display on the OSD
 ---
----@param  str string
----@return     string
+---@param  str        string
+---@param  no_escape? boolean
+---@return            string
 local function ass_escape(str, no_escape)
 
     local disable = type(no_escape) == "table" and no_escape or { }
@@ -789,9 +744,8 @@ function _G.update()
     -- Render log messages as ASS. This will render at most screeny / font_size messages.
     local log_ass = ''
     -- @NOTE: math.ceil only takes one arg?
-    local viewable_log_message_count = math.min(#_G.log_buffer, math.ceil(screeny, opts.font_size))
+    local viewable_log_message_count = math.min(#_G.log_buffer, math.ceil(screeny / opts.font_size))
 
-    -- @TODO: Inline function calls if affecting speed
     -- @TODO: Return escaped string to position in line/node buffer and allow the now semi-memoized
     --        value to be passed through again instead of repeatedly processing it. This effectively
     --        adds a third kind of log buffer entry type, the (rendered) string
@@ -799,14 +753,7 @@ function _G.update()
 
     ---@param node table<'text' | 'style', string>
     local function process_buffer_node(node)
-        -- -- Original
-        -- log_ass = log_ass .. style .. node.style .. ass_escape(node.text)
-
-        -- Faster or slower?
         log_ass = string.format('%s%s%s%s', log_ass, style, node.style or '', ass_escape(node.text))
-
-        -- -- Faster or slower?
-        -- log_ass = table.concat({log_ass, style, node.style, ass_escape(node.text)}, '')
     end
 
     for i = #log_buffer - viewable_log_message_count + 1, #log_buffer
@@ -824,9 +771,8 @@ function _G.update()
         --
 
         -- Regular line: Check if item has style / text key
-        if type(log_buffer[i].text) == 'string' --[[ or type(log_buffer[i].style) == 'string' ]]
+        if type(log_buffer[i].text) == 'string'
         then
-            -- log_ass = log_ass .. style .. node.style .. ass_escape(node.text)
             process_buffer_node(log_buffer[i])
 
         -- Detailed line: Check for array indicies
@@ -886,6 +832,7 @@ function _G.update()
 end
 
 -- Set the Console visibility ("enable", Esc)
+---@param active? boolean
 local function set_active(active)
     if active == _G.active then return end
     if active
@@ -997,7 +944,7 @@ end
 
 --endregion UTF Util
 
--- Close the console if the current line is empty, otherwise do nothing (Ctrl+D)
+--- Close the console if the current line is empty, otherwise do nothing (Ctrl+D)
 local function close_console_if_empty()
     if _G.line == ''
     then
@@ -1072,10 +1019,12 @@ end
 ---@alias CommandList CommandInfo[] @ Native value of `command-list` property.
 
 local log = msg.extend('!help')
--- Help Display Function-copied from new console script(migration of repl.lua)
--- TODO: Make columns or something for the list outputs its horrible
+
+--- Help Display Function-copied from new console script(migration of repl.lua)
+---
+--- TODO: Make columns or something for the list outputs its horrible
 ---@param param string
-local function help_command_custom(param)
+local function help_command_extended(param)
 
     -- Process possible dangerous optional param
     local param = param or nil
@@ -1105,7 +1054,6 @@ local function help_command_custom(param)
         --     - Print out commands with log style `cmd_style`
         --     - Limit columns of commands per line (check for longest)
 
-        --
         output = 'Available commands:\n'
         -- Use this variable for logging commands
         local cmd_output    = ''
@@ -1119,7 +1067,8 @@ local function help_command_custom(param)
         do
             output = output  .. '  ' .. cmd.name
         end
-        output = string.format('%s%s%s%s',
+
+        output = format('%s%s%s%s',
             output, '\n',
             'Use "help command" to show information about a command.\n',
             "ESC or Ctrl+d exits the console.\n"
@@ -1165,13 +1114,8 @@ local function help_command_custom(param)
     _G.log_add('', output)
 end
 
--- Call debug etc function
-script_messages.register('help', help_command_custom)
---- mp.register_script_message('help', help_command_custom)
-
--- Call debug etc function
-script_messages.register('?', help_command_custom)
---- mp.register_script_message('?', help_command_custom)
+script_messages.register('help', help_command_extended)
+script_messages.register('?', help_command_extended)
 
 --- Format perf sample for output
 ---@param memory number | PerfEventEntry
@@ -1219,6 +1163,7 @@ local function reload(delay_ms)
     log.info('Setting mp.keep_running to false...')
     mp.keep_running = false
 end
+
 script_messages.register('reload-console', reload)
 
 --endregion Modded Help
@@ -1226,14 +1171,6 @@ script_messages.register('reload-console', reload)
 --endregion Help Command
 
 --region script-message alias
-
---[[ -- Testing implementation from mailling list below (may be identical)
----@param  str string
----@return     string
-local function trim(str)
-    return str:match('^()%s*$') and '' or str:match('^%s*(.*%S)')
-end
-]]--
 
 ---@type fun(string: string): string
 local trim = nil
@@ -1280,23 +1217,10 @@ end
 --region Line Editing
 
 local log = msg.extend('handle_char_input')
--- Insert a character at the current cursor position (any_unicode, Shift+Enter)
+
+--- Insert a character at the current cursor position (any_unicode, Shift+Enter)
 ---@param c? string
 local function handle_char_input(c)
-
-    --[[
-    -- @NOTE Added to fix crash on Shift+Enter (incorrect bind1 implementation)
-    if not (type(c) == 'string' and #c > 0)
-    then
-        log.warn('c parameter is not a string, exiting early.')
-        return
-
-    elseif not (type(c) == 'string' and #c > 0)
-    then
-        log.warn('c parameter is a zero length string, exiting early.')
-        return
-    end
-    ]]--
 
     if _G.insert_mode == true
     then
@@ -1321,7 +1245,7 @@ local function text_input(info)
     end
 end
 
--- Remove the character behind the cursor (Backspace)
+--- Remove the character behind the cursor (Backspace)
 local function handle_backspace()
     if _G.cursor <= 1 then return end
 
@@ -1331,7 +1255,7 @@ local function handle_backspace()
     _G.update()
 end
 
--- Remove the character in front of the cursor (Del)
+--- Remove the character in front of the cursor (Del)
 local function handle_del()
     if _G.cursor > _G.line:len() then return end
     _G.line = _G.line:sub(1, _G.cursor - 1)
@@ -1339,22 +1263,22 @@ local function handle_del()
     _G.update()
 end
 
--- Toggle insert mode (Ins)
+--- Toggle insert mode (Ins)
 local function handle_ins()
     _G.insert_mode = not _G.insert_mode
 end
 
--- Clear the current line (Ctrl+C)
+--- Clear the current line (Ctrl+C)
 local function clear()
     _G.line        = ''
     _G.cursor      = 1
     _G.insert_mode = false
-    _G.history_pos = #history_orig + 1
+    _G.history_pos = #_G.history_orig + 1
     _G.update()
 end
 
--- Delete from the cursor to the end of the word (Ctrl+W)
-function del_word()
+--- Delete from the cursor to the end of the word (Ctrl+W)
+function _G.del_word()
     local before_cur = _G.line:sub(1, _G.cursor - 1)
     local after_cur = _G.line:sub(_G.cursor)
 
@@ -1364,14 +1288,14 @@ function del_word()
     _G.update()
 end
 
--- Delete from the cursor to the end of the line (Ctrl+K)
-local function del_to_eol()
+--- Delete from the cursor to the end of the line (Ctrl+K)
+function _G.del_to_eol()
     _G.line = _G.line:sub(1, _G.cursor - 1)
     _G.update()
 end
 
--- Delete from the cursor back to the start of the line (Ctrl+U)
-local function del_to_start()
+--- Delete from the cursor back to the start of the line (Ctrl+U)
+function _G.del_to_start()
     _G.line = _G.line:sub(_G.cursor)
     _G.cursor = 1
     _G.update()
@@ -1387,7 +1311,8 @@ local log = msg.extend('go_history')
 ---@param new_pos    number
 ---@param no_update? boolean
 local function go_history(new_pos, no_update)
-    log.debug('Changing history position to %s', new_pos ~= nil and tostring(new_pos) or '[unpassed]')
+    log.debug('Changing history position to %s',
+        new_pos ~= nil and tostring(new_pos) or '[unpassed]')
 
     -- New position is necessary—this function should be wrapped by convenience functions
     if type(new_pos) ~= 'number'
@@ -1395,7 +1320,9 @@ local function go_history(new_pos, no_update)
         error('go_history: new_pos parameter is not a number.')
     end
 
+    ---@type number
     local old_pos     = _G.history_pos
+    ---@type number
     local history_len = #_G.history_orig
     log.debug('Position before update: %s', old_pos)
 
@@ -1422,7 +1349,7 @@ local function go_history(new_pos, no_update)
     -- entry. This makes it much less frustrating to accidentally hit Up/Down
     -- while editing a line.
     if old_pos == history_len + 1
-        and _G.line                     ~= ''
+        and _G.line                      ~= ''
         and _G.history_orig[history_len] ~= _G.line
     then
         -- As long as history length stored locally this needs to be updated
@@ -1456,6 +1383,7 @@ end
 
 local hlog  = msg.extend('history-prefix-search')
 local hlogb = hlog.extend('back')
+
 ---
 --- Move to previous history entry starting with current line content
 ---
@@ -1464,9 +1392,6 @@ local hlogb = hlog.extend('back')
 local function go_history_prefix_backward(line, increment_on_failure)
     hlogb.debug('Starting history prefix search, backward')
 
-    -- -- Original:
-    -- line = line or _G.line
-    -- Condition only for debugging
     if type(line) ~= 'string'
     then
         line = _G.line
@@ -1478,8 +1403,10 @@ local function go_history_prefix_backward(line, increment_on_failure)
         increment_on_failure = true
     end
 
+    ---@type number
     --- @NOTE: This is assigned to the _next_ value, not current
     local search_pos     = _G.history_pos - 1
+    ---@type number
     local history_length = #_G.history_orig
 
     -- Exit early if line is empty
@@ -1524,6 +1451,7 @@ local function go_history_prefix_backward(line, increment_on_failure)
 end
 
 local hlogf = hlog.extend('fwd')
+
 ---
 --- Move to next history entry starting with current line content
 ---
@@ -1532,8 +1460,6 @@ local hlogf = hlog.extend('fwd')
 local function go_history_prefix_forward(line, increment_on_failure)
     hlogf.debug('Starting history prefix search, forward')
 
-    -- -- Original:
-    -- line = line or _G.line
     -- Condition only for debugging
     if not is.String(line)
     then
@@ -1546,8 +1472,10 @@ local function go_history_prefix_forward(line, increment_on_failure)
         increment_on_failure = true
     end
 
+    ---@type number
     --- @NOTE: This is assigned to the _next_ value, not current
     local search_pos     = _G.history_pos + 1
+    ---@type number
     local history_length = #_G.history_orig
 
     -- Check if at end already
@@ -1600,19 +1528,20 @@ end
 
 --region Key Handlers
 
--- Go to the first command in the command history (PgUp)
+--- Go to the first command in the command history (PgUp)
 function _G.handle_pgup()
     go_history(1)
 end
 
--- Stop browsing history and start editing a blank line (PgDown)
+--- Stop browsing history and start editing a blank line (PgDown)
 function _G.handle_pgdown()
-    go_history(#history_orig + 1)
+    go_history(#_G.history_orig + 1)
 end
 
 local save_preexpanded_line_in_history = false
 
 local log = msg.extend('handle_enter')
+
 ---
 --- Run the current command and clear the line (Enter)
 ---
@@ -1622,7 +1551,7 @@ _G.handle_enter = function()
     log.debug('Console line content at time of enter handle: "%s"', line_init)
 
     -- Exit immediately if no non-whitespace content
-    local line_trimmed = trim(line_init) -- line_init:gsub('^%s+', ''):gsub('%s+$', '')
+    local line_trimmed = trim(line_init)
     if line_trimmed == '' then return end
 
     -- Record (unprocessed) input line to history if option variable set true
@@ -1662,14 +1591,14 @@ _G.handle_enter = function()
     if matched_help_mod
     then
         msg.debug('Received input for custom help function: "%s"', tostring(matched_help_mod))
-        help_command_custom(matched_help_mod)
+        help_command_extended(matched_help_mod)
 
     elseif matched_help
     then
         if override_base_help
         then
             msg.debug('Using modified help function. Input: "%s"', tostring(matched_help))
-            help_command_custom(matched_help_mod)
+            help_command_extended(matched_help_mod)
 
         else
             help_command(matched_help)
@@ -2175,12 +2104,13 @@ local function build_completers()
     {
         set              = '^%s*set%s+',
         set_profile      = '^%s*set%s+profile%s+',
+        apply_profile    = '^%s*apply[-]profile%s+',
         add              = '^%s*add%s+',
         cycle            = '^%s*cycle%s+',
         cycle_values     = '^%s*cycle[-]values%s+',
         multiply         = '^%s*multiply%s+',
         load_script      = '^%s*load[-]script%s+',
-        script_msg       = '^%s*script-message%s+',
+        script_msg       = '^%s*script[-]message%s+',
         af_cmd           = '^%s*af%s+',
         vf_cmd           = '^%s*vf%s+',
         script_msg_alias = '^%s*!%s+',
@@ -2217,10 +2147,13 @@ local function build_completers()
         { pattern = prefix.af_cmd ..  [[()]] .. token .. '()$', list = filter_subcmd_list },
 
         -- Profiles
-        { pattern = prefix.set_profile ..  [[()]] .. token .. '()$',       list = profile_list, append = ' '  },
-        { pattern = prefix.set_profile .. [["()]] .. token .. '()$',       list = profile_list, append = '" ' },
-        { pattern = prefix.set_profile .. [['()]] .. token .. '()$',       list = profile_list, append = "' " },
-        { pattern = prefix.set_profile .. bracket_begin .. '()[^}%s]*()$', list = profile_list, append = '}'  },
+        { pattern = prefix.apply_profile ..  [[()]] .. token .. '()$',       list = profile_list, append = ' '  },
+        { pattern = prefix.apply_profile .. [["()]] .. token .. '()$',       list = profile_list, append = '" ' },
+        { pattern = prefix.apply_profile .. [['()]] .. token .. '()$',       list = profile_list, append = "' " },
+        { pattern = prefix.set_profile ..    [[()]] .. token .. '()$',       list = profile_list, append = ' '  },
+        { pattern = prefix.set_profile ..   [["()]] .. token .. '()$',       list = profile_list, append = '" ' },
+        { pattern = prefix.set_profile ..   [['()]] .. token .. '()$',       list = profile_list, append = "' " },
+        { pattern = prefix.set_profile ..   bracket_begin .. '()[^}%s]*()$', list = profile_list, append = '}'  },
 
         -- Prop => set
         { pattern = prefix.set ..  [[()]] .. token_part .. '()$', list = prop_list, append = ' '    },
@@ -2566,9 +2499,9 @@ local function get_bindings()
         { 'pgdwn',       _G.handle_pgdown                       },
         { 'ctrl+c',      clear                                  },
         { 'ctrl+d',      close_console_if_empty                 },
-        { 'ctrl+k',      del_to_eol                             },
+        { 'ctrl+k',      _G.del_to_eol                             },
         { 'ctrl+l',      clear_log_buffer                       },
-        { 'ctrl+u',      del_to_start                           },
+        { 'ctrl+u',      _G.del_to_start                           },
         { 'ctrl+v',      bind1(paste, true)                     },
         { 'meta+v',      bind1(paste, true)                     },
         { 'ctrl+w',      _G.del_word                            },

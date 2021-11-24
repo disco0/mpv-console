@@ -1,6 +1,14 @@
+local M = setmetatable({ }, {
+_NAME = 'console-builtin-extensions-global',
+_DESCRIPTION = [[Additions for lua intrinsic types—global version of script that binds additions to global type tables (also returns module form).]]
+})
+
+-- @NOTE: In preparation for full modularization, beginning to  move method style calls
+--        (`<target>:<method>(...args)`) to safer form <method>(<target>, ...args)
+
 --region String
 
--- local string = string
+local string_ext = { }
 
 ---
 --- Used in `get_all_completions`
@@ -8,7 +16,7 @@
 ---@param self string
 ---@param base string
 ---@return boolean
-function string.starts_with(self, base)
+local function starts_with(self, base)
     if type(base) ~= "string" or type(self) ~= "string"
     then
         error("[string:starts_with] self or base argument is not string (self:" .. tostring(self).. ", base: " .. tostring(base) .. ")")
@@ -17,20 +25,26 @@ function string.starts_with(self, base)
     return self:sub(1, #base) == base
 end
 
+string_ext.starts_with = starts_with
+string.starts_with     = starts_with
+
 ---
 --- Escape possible `%*` format expressions in `str`
 ---
 ---@param  str string
 ---@return     string
-function string.format_escape(str)
+function string_ext.format_escape(str)
     return (str or ''):gsub('(%%)', '%%%1')
 end
+
+string.format_escape = string_ext.format_escape
 
 --region Quoting
 
 ---@return string
 function string.quot(self)
     -- Get double quoted form, and replace with single quotes
+
     local dquoted = self:dquot()
     return [[']] .. dquoted:sub(2, #dquoted - 1) .. [[']]
 end
@@ -288,3 +302,51 @@ end
 --endregion Strings
 
 -- end)
+
+--region os
+
+---
+--- Capture command output
+---
+---@param  cmd string
+---@overload fun(cmd: string, as_lines: true): string[]
+---@return     string
+function os.capture(cmd, as_lines)
+    if type(as_lines) ~= 'boolean'
+    then
+        as_lines = false
+    end
+    local cmd      = (type(cmd) == "string" and cmd) or nil
+    assert(cmd)
+
+    -- Invoke command and read output
+    local f = assert(io.popen(cmd, 'r'))
+
+    -- If lines arg is passed true, return iterator of lines
+    if as_lines
+    then
+        local line_itr = assert(f:lines())
+        local lines = { }
+
+        for entry in f:lines()
+        do
+            lines[#lines + 1] = entry
+        end
+        f:close()
+
+        return lines
+    else
+        local s = assert(f:read('*a'))
+        f:close()
+
+        return s
+    end
+end
+
+---@param cmd string
+---@return    string[]
+function os.capture_lines(cmd)
+    return os.capture(cmd, true)
+end
+
+--endregion os

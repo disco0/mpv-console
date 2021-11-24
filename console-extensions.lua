@@ -1,29 +1,24 @@
---- console2.lua -- Additional functions for mpv console script
----    "If console is so good why is there no console 2?"
----
---- Migrated from repl++ originally for repl.lua
----
+local M = setmetatable({ }, {
+_NAME = 'console-extensions',
+_DESCRIPTION = [[Additional functions for mpv console script
+Migrated from console2.lua extension, from original repl++ script for repl.lua
+
+"If console is so good why is there no console 2?"]]
+})
 
 --region Imports
 
 local mp = mp
-local msg    = require('log-ext').msg
-local Prefix = require('log-ext').Prefix
+local utils   = require('mp.utils')
+local msg     = require('log-ext').msg
+local Prefix  = require('log-ext').Prefix
 local assdraw = require('mp.assdraw')
-local utils = require('mp.utils')
-local is = require('util.guard').is
-local script_messages = require('script-message-tracker')
-
-local opts = require('console-options').options
-
-local macro = require('console.macros')
+local is      = require('util.guard').is
+local fn      = require('fn')
+local opts    = require('console-options').options
+local macro   = require('console.macros')
 local default_macro_table_factory = macro.util.defaults.get_default_macros
-
---region External Command Scripts
-
-require('commands.log-hooks')
-
---endregion External Command Scripts
+local script_messages = require('script-message-tracker')
 
 --endregion Imports
 
@@ -56,7 +51,8 @@ do
         return (sanitize(extends) == sanitize(mp.get_script_name()))
     end
 
-    if lib_check(extends) ~= true then
+    if lib_check(extends) ~= true
+    then
         msg.debug( 'Exiting ' .. mp.get_script_name() ..
                         ': Not loaded as library for ' .. extends .. '.')
         return
@@ -106,10 +102,12 @@ script_messages.register('lua', print_luainfo)
 ---@param val2 any
 local function toggle_property(name, val1, val2)
     local val = mp.get_property(name)
-    if(val == val1) then
+    if(val == val1)
+    then
         mp.set_property(name, val2)
         mp.osd_message(name .. ': ' .. val2)
-    elseif(val == val2) then
+    elseif(val == val2)
+    then
         mp.set_property(name, val1)
         mp.osd_message(name .. ': ' .. val1)
     else
@@ -139,14 +137,15 @@ local blacklist = { "set", "cycle", "cycle-values" }
 local function print_line(line)
     local to_print = line
     local cmd      = ""
-    for w in to_print:gmatch("%S+") do
-    -- if w ~= "set" then
-        if not blacklist[w] then
-            cmd = "print-text \"" .. w .. " " .. proc_arrow .. " ${" .. w .. "}\" "
-            mp.command(cmd)
+    for w in to_print:gmatch("%S+")
+    do
+        if not blacklist[w]
+        then
+            -- Converted from concat, not tested lol
+            mp.command(([[print-text "\"%s\" %s ${%s}"]]):format(w, proc_arrow, w))
         end
     end
-    update()
+    _G.update()
 end
 
 ---
@@ -157,10 +156,10 @@ end
 --- `tostring`'ed representation of the type but when returning to this code it
 --- was returning `nil`.)
 ---
---@param str           string
---@param default_value string | nil
---@return nil
-function print_prop_type(str, default_value)
+---@param  str           string
+---@param  default_value string | nil
+---@return               nil
+local function print_prop_type(str, default_value)
     default_value = default_value or ''
     ---@type string
     local cmd = ""
@@ -176,12 +175,11 @@ function print_prop_type(str, default_value)
             mp.command(cmd)
         end
     end
-    update()
-    return
+    _G.update()
 end
 
 local gt_log = msg.extend('get_type')
--- local gt_log = Prefix.fmsg('get_type')
+
 ---
 --- Attempt to get (mpv property) type of first token-like string in
 --- `prop_name`, if defined return its type in string form.
@@ -191,17 +189,16 @@ local gt_log = msg.extend('get_type')
 ---
 ---@param  str string
 ---@return     string
-function get_type(str, default_value)
+local function get_type(str, default_value)
     default_value = is.String(default_value) and default_value or ''
     str           = is.String(str)           and str           or ''
 
-    gt_log.debug('Input string: "' .. str .. '"')
-    -- if w ~= "set" then~
+    gt_log.debug('Input string: "%s"', str)
     local token = str:match("[a-zA-Z_\\/-]+") or ""
 
-    gt_log.debug('Checking for property name (matched string) "' .. token .. '"')
+    gt_log.debug('Checking for property name (matched string) "%s"', token)
 
-    if token and #token > 0 and blacklist[token] == nil
+    if token and blacklist[token] == nil
     then
         local prop_value = mp.get_property_native(w, nil)
         if prop_value ~= nil
@@ -226,7 +223,8 @@ local function cycle_line(line)
     local cmd = ""
     for w in line:gmatch("%S+")
     do
-        if not blacklist[w] then
+        if not blacklist[w]
+        then
             local prop = mp.get_property(tostring(w))
             if prop == "yes" or prop == "no"
             then
@@ -248,17 +246,18 @@ end
 ---@param line    string
 ---@param postfix string
 ---@return nil
-function cons_line(prefix, line, postfix)
-    go_home()
+local function cons_line(prefix, line, postfix)
+    _G.go_home()
     prefix:gsub(".", function(c) handle_char_input(c) end)
-    go_end()
-    if postfix then
+    _G.go_end()
+    if postfix
+    then
         postfix:gsub(".", function(c)
             handle_char_input(c)
         end)
-        prev_char(postfix.len)
+        _G.prev_char(postfix.len)
     end
-    update()
+    _G.update()
 end
 
 --endregion Macros
@@ -282,40 +281,53 @@ local function eval_line(line)
     --         - Integrate do_line() code into body?
     local function parse_statements(line)
         local statements = {}
-        for statement in line:gmatch('[^ ;][^;]*[;]?') do
-            if #statement > 0 then
-                if statement:sub(-1):match(';') then
+        for statement in line:gmatch('[^ ;][^;]*[;]?')
+        do
+            if #statement > 0
+            then
+                if statement:sub(-1):match(';')
+                then
                     statements[#statements + 1] = statement
                 else
                     statements[#statements + 1] = statement .. ';'
                 end
             end
         end
-        update()
+        _G.update()
         return statements
     end
 
     local function do_line(line)
-        if line:match(';') then
+        if line:match(';')
+        then
             local statements = parse_statements(line)
-            if statements then
+            if statements
+            then
                 local line_ = ""
-                for _, s in ipairs(statements) do
-                    if s:match('![ ]*([^ ].*)') then
-                        line_ = line_ .. (s:gsub('![%s]*', "script-message "))
-                    else
-                        line_ = line_ .. s
-                    end
+                for _, s in ipairs(statements)
+                do
+                    -- Don't think conditional is necessary, remove commented out code if
+                    -- everything working
+                    line_ = line_ .. s:gsub('^[ ]*![%s]*', "script-message ")
+                    -- if s:match('^[ ]*![ ]*([^ ].*)')
+                    -- then
+                    --     line_ = line_ .. s:gsub('^[ ]*![%s]*', "script-message ")
+                    -- else
+                    --     line_ = line_ .. s
+                    -- end
                 end
                 return line_
             end
         else
-            if line:match('![ ]*([^ ].*)') then
-                line = (line:gsub('!', "script-message "))
-                return line
-            else
-                return line
-            end
+            -- (See above comment at previous use of below commented code)
+            line_ = line_ .. s:gsub('^[ ]*![%s]*', "script-message ")
+            -- if line:match('![ ]*([^ ].*)')
+            -- then
+            --     line = line:gsub('![ ]*', "script-message ")
+            --     return line
+            -- else
+            --     return line
+            -- end
         end
     end
     --
@@ -364,7 +376,7 @@ local function preprocess_line(_line)
     local line_init, line_proc = _line, _line
 
     -- Pull current line value if line argument not a string value
-    if type(_line) ~= 'string'
+    if is.String(_line)
     then
         log.warn('line parameter passed into eval_line is not a string, using global line value as a fallback.')
         if type(_G.line) ~= "string"
@@ -389,29 +401,23 @@ local function preprocess_line(_line)
     ---@return      string[]
     local function parse_statements(line)
         ---@type string[]
-        local statements = {}
-        for statement in line:gmatch('[^ ;][^;]*[;]?') do
-            if #statement > 0 then
-                if statement:sub(-1):match(';') then
+        local statements = { }
+        for statement in line:gmatch('[^ ;][^;]*[;]?')
+        do
+            if #statement > 0
+            then
+                if statement:sub(-1):match(';')
+                then
                     statements[#statements + 1] = statement
                 else
                     statements[#statements + 1] = statement .. ';'
                 end
             end
         end
-        update()
+        -- _G.update()
         Prefix.fmsg_method('parse_statements', 'trace')('Parsed %i statements.', #statements)
         return statements
     end
-
-    -- -- Macro block logging function
-    -- --@param log_text string
-    -- function dbg_macros( log_text )
-    --     local debug_prefix = '[macros]'
-    --     log_text = (type(log_text) and log_text) or ''
-    --     msg.debug(debug_prefix .. ' ' .. log_text)
-
-    -- end
 
     local t_log = log.extend('trim_macro_padding')
     ---@param  macro_text string
@@ -420,7 +426,7 @@ local function preprocess_line(_line)
         macro_text = type(macro_text) == "string" and macro_text or ''
         if #macro_text < 1
         then
-            msg.warn('[trim_macro_padding] macro_text is zero-length or non-string.')
+            t_log.warn('macro_text is zero-length or non-string.')
             return ''
         else
 
@@ -430,14 +436,11 @@ local function preprocess_line(_line)
             -- (Remove/comment this after everything appears to be working)
             local macro_text_clean, sub_count = macro_text:gsub([[%s+\n]] , "\n")
 
-            t_log.debug('%i lines corrected.', tostring(sub_count))
+            t_log.debug('%s lines corrected.', tostring(sub_count))
             t_log.debug([[Corrected macro output:]])
-            t_log.debug('  ' .. macro_text_clean )
+            t_log.debug('  %s', macro_text_clean)
 
             return macro_text_clean
-
-            -- -- Direct substitution only
-            -- macro_text:gsub( '\n[%s]+' , '\n')
         end
     end
 
@@ -449,13 +452,15 @@ local function preprocess_line(_line)
 
         exp_log.debug('Entering macro expansion block.')
 
-        if type(raw_line) ~= "string"
+        if not is.String(raw_line)
         then
             exp_log.warn('Value of line passed in raw_line argument is non-string type (%s).', type(raw_line))
             return ''
 
         --region Has macro-like tokens
-        elseif raw_line:match("[^%s]") == "#" and raw_line:find("^[%s]*#[^%s#;]+") then
+
+        elseif raw_line:match("[^%s]") == "#" and raw_line:find("^[%s]*#[^%s#;]+")
+        then
             local symbol_read = raw_line:match("^[%s]*#[^%s#;]+"):sub(2)
 
             exp_log.trace([[`#` prefix found in line. ]])
@@ -485,13 +490,16 @@ local function preprocess_line(_line)
 
                 return expanded
             end
+
         --endregion Has macro-like tokens
         else
+
         --region No macro-like tokens
 
             return raw_line
 
         --endregion No macro-like tokens
+
         end
     end
 
@@ -499,26 +507,21 @@ local function preprocess_line(_line)
     local function do_line(line)
         local dbg = log.extend('do_line')
 
-        dbg.trace(string.format('Processing line input: "%s"', line))
+        dbg.trace('Processing line input: "%s"', line)
 
         -- Check for statement terminators, break down statements
-        if line:match(';') then
+        if line:match(';')
+        then
             dbg.trace('Found semicolons in line, treating it like it contains multiple substatements.')
             local statements = parse_statements(line)
-            if statements then
+            if statements
+            then
                 local line_ = ""
+
                 for _, s in ipairs(statements)
                 do
                     dbg.trace('  Statement: %s', string.dquot(s))
-                    --   Can't remember if originally script-message
-                    -- prefixes to be tokens, full on prefixes, or both,
-                    -- but majority use is as a prefix char to the token
-                    -- so its going to be only that for now (with the
-                    -- whitespace friendly version commented out for
-                    -- later, of course.)
-                    -- if s:match('![ ]*([^ ].*)') then
-                    -- if s:match('!([^ ].*)') then
-                    if s:match('^[%s]*!([^ ].*)')
+                    if s:match('^[%s]*![ ]*([^ ;].*)')
                     then
                         dbg.trace('Expanding "!" script-message aliases for substatement.')
                         line_ = line_ .. (s:gsub('^[%s]*![%s]*', "script-message "))
@@ -536,7 +539,8 @@ local function preprocess_line(_line)
             ---@type string
             local _line = ''
             dbg.trace('Treating line as one single statement.')
-            if line:match('![ ]*([^ ].*)') then
+            if line:match('![ ]*([^ ].*)')
+            then
                 dbg.trace('Expanding "!" script-message aliases.')
                 _line = (line:gsub('!', "script-message "))
             else
@@ -556,12 +560,12 @@ local function preprocess_line(_line)
 
     log.trace('About to enter macro expansion.')
     log.trace('  Line Input:')
-    log.trace('    ' .. string.dquot(line_init) .. '')
+    log.trace('    %s', string.dquot(line_init))
 
     -- Expand all found macros initial line content
     line_proc = expand_macros(line_init)
 
-    if type(line_proc) ~= "string" or #line_proc == 0
+    if (not is.String(line_proc)) or #line_proc == 0
     then
         log.error('expand_macros returned empty or non-string line value. (type: ' .. tostring(type(line_proc)) .. ')')
         log.warn('Restoring original value of line after bad return value from expand_macros')
@@ -572,45 +576,13 @@ local function preprocess_line(_line)
         log.trace([[    '%s']], line_proc)
     end
 
-    --[=[
-    do
-        --> TODO:   I think the issue with the repl not drawing immediately
-        ---       might be in the macro block, at the moment its currently
-        ---       replacing the whole line instead the macro token ( even
-        ---       if this isn't the reason, its retarded )
-        dbg( [[ Entering macro expansion block. ]] )
-        if line:match("[^%s]") == "#" and line:find("^[%s]*#[^%s#;]+") then
-            local symbol_read = line:match("^[%s]*#[^%s#;]+"):sub(2)
-
-            dbg( [[ # prefix found in line. ]] )
-            dbg( [[ line:match("^[%s]*#[^%s#;]+"):sub(2) => ']] .. symbol_read .. "'" )
-
-            if _G.macros[symbol_read] then
-                line = line:gsub(
-                    '^([^#]*)(#[^%s]+)(.*)$',
-                    function( pre, macro, post )
-                        -- not sure if you can just return a string held together with spit in lua
-                        local  expanded_line =  pre .. _G.macros[symbol_read] .. post
-                        return expanded_line
-                end)
-
-                dbg( [[ [new] Result using line:gsub to expand macro in place instead of replacing the whole line => ]] .. "\n\t"  .. line )
-                -- dbg( [[ [old] Established, lazier method => ]] .. "\n\t"  .. line )
-                dbg( [[ Replacing value of line with _G.macros[]] .. symbol_read .. '].' )
-                dbg( [[ _G.macros[" ]] .. symbol_read .. [[ "] => ']] ..  _G.macros[symbol_read] .. "'.'" )
-                dbg( [[ This is still debug output, if you have not seen a second copy of the macro expansion (or its byproducts in the log) there is still a issue." ]] )
-            end
-        end
-    end
-    -- ! => script-message
-    ]=]--
-
-    if string.match(line_proc, '[^"]*!') then
+    -- @TODO: Remember why this condition was here
+    if string.match(line_proc, '[^"]*!')
+    then
         -- lol
-        return (do_line(line_proc))
+        return do_line(line_proc)
     else
-        return (do_line(line_proc))
-        -- return line
+        return do_line(line_proc)
     end
 
     --endregion Main function block
@@ -618,27 +590,19 @@ end
 
 --endregion eval++
 
+local log = msg.extend('pretty-print-nodes')
 ---
---- Device explorer
+--- Node structure printer
 ---
----@param text string
----@return nil
-local function device_info(text)
-    if not text or text == "a" then
-        plist = mp.get_property_native("audio-device-list")
-    else
-        plist = mp.get_property_osd(text)
+---@param  property string
+---@param  filter   string
+---@return          nil
+local function pretty_print_nodes(property, filter)
+    if not is.String(property) or #property < 1
+    then
+        log.warn('Parameter property is non-string type or zero length.')
+        return
     end
-    pdbg(plist)
-end
-
-local fi_log = Prefix.fmsg('filterinfo')
----
---- Audio Filter View
----
----@param  filter string
----@return nil
-local function af_filter_info(filter)
     local do_filter = type(filter) == "string" and #filter > 0
 
     local styles =
@@ -652,13 +616,15 @@ local function af_filter_info(filter)
         dim     = '{\\1c&H444444&}',
     }
 
-    ---@type AudioFilterNode[]
-    local af_data = mp.get_property_native("af", {})
+    ---@type FilterNode[]
+    local nodes = mp.get_property_native(property, {})
 
-    for k, v in ipairs(af_data) do
+    for k, v in ipairs(nodes)
+    do
 
         ---@type DetailedLogLine
         local entry = { }
+
         ---@param block LogLine
         local function append(block)
             entry[#entry + 1] =
@@ -668,40 +634,44 @@ local function af_filter_info(filter)
             }
         end
 
-        append{ style = '' , text = ' ' }
+        append { style = '' , text = ' ' }
+
         -- If tagged with a label
         if v.label
         then
-            append{ style = styles.heading,
-                    text  = '@' .. v.label }
+            append { style = styles.heading, text  = '@' .. v.label }
         -- Otherwise filter index
         else
-            append{ style = styles.base,
-                    text  = tostring(k) }
+            append { style = styles.base, text  = tostring(k) }
         end
-        append{ style = styles.base,   text = ' - ' }
-        append{ style = styles.accent, text = v.name }
 
-        if not v.enabled then
-            append{ style = styles.base, text = ' '           }
-            append{ style = styles.dim,  text = ' [disabled]' }
+        append { style = styles.base,   text = ' - ' }
+        append { style = styles.accent, text = v.name }
+
+        if not v.enabled
+        then
+            append { style = styles.base, text = ' '           }
+            append { style = styles.dim,  text = ' [disabled]' }
         else
-            -- append{ style = styles.base, text = '' }
+            -- append { style = styles.base, text = '' }
         end
 
 
         local params_added = 0
         local total = #v.params
 
-        msg.fdebug('Processing %s parameters in filter %s', total, v.label or k)
-        append{ style = styles.delim, text = ' { ' }
-        for key, value in pairs(v.params) do
-            append{ style = styles.key,   text = key }
-            append{ style = styles.delim, text = "=" }
-            append{ style = styles.value, text = tostring(value) }
+        log.debug('Processing %s parameters in filter %s', total, v.label or k)
+
+        append { style = styles.delim, text = ' { ' }
+
+        for key, value in pairs(v.params)
+        do
+            append { style = styles.key,   text = key }
+            append { style = styles.delim, text = "=" }
+            append { style = styles.value, text = tostring(value) }
 
             -- Append an additional key-values separator
-            append{ style = styles.delim, text = ',' }
+            append { style = styles.delim, text = ',' }
 
             -- Increment added count
             params_added = params_added + 1
@@ -711,127 +681,84 @@ local function af_filter_info(filter)
         -- @NOTE: Might be better to always remove the last node, and then check the opposite
         --        before adding the closing bracket—(I think) in the case of no params it would
         --        remove the opening bracket, and then skip adding the closing one.
-        if params_added > 0 then
+        if params_added > 0
+        then
             entry[#entry] = nil
         end
 
-        append{ style = styles.delim, text = ' }' }
-
-        append{ style = '', text = '\n' }
+        append { style = styles.delim, text = ' }' }
+        append { style = '',           text = '\n' }
 
         -- Push constructred complex log history item
         log_add_advanced(entry)
     end
 end
 
----@class AudioFilterNode
+---
+--- Audio/video filter print
+---
+--- mp.register_script_message('devices', function(text)
+script_messages.register('afi', function(text) pretty_print_nodes('af', text) end)
+script_messages.register('vfi', function(text) pretty_print_nodes('vf', text) end)
+
+---@class FilterNode
 ---@field public enabled boolean
----@field public name    string  | nil
+---@field public name    string | nil
 ---@field public label   string | nil
 ---@field public params  table<string, string>
 
 ---
---- A/V Device Explorer
----
---- mp.register_script_message('devices', function(text)
-script_messages.register('afi', function(text) af_filter_info(text) end)
-
----
---- Capture command output
----
----@param  cmd string
----@overload fun(cmd: string, as_lines: true): string[]
----@return     string
-function os.capture(cmd)
-    local as_lines = as_lines or false
-    local cmd      = (type(cmd) == "string" and cmd) or nil
-    assert(cmd)
-
-    -- Invoke command and read output
-    local f = assert(io.popen(cmd, 'r'))
-
-    -- If lines arg is passed true, return iterator of lines
-    if as_lines
-    then
-        local line_itr = assert(f:lines())
-        local lines = { }
-
-        for entry in f:lines()
-        do
-            lines[#lines + 1] = entry
-        end
-        f:close()
-
-        return lines
-    else
-        local s = assert(f:read('*a'))
-        f:close()
-
-        return s
-    end
-end
-
----@param cmd string
----@return    string[]
-function os.capture_lines(cmd)
-    return os.capture(cmd, true)
-end
-
----
 --- Enumerate Audio Filter Data
 ---
+--- @TODO: Filter lines so you actually see the relevant info
+---
+--- @TODO: Allow additional filtering based on parameter
+---
+--- @TODO: Parse both types of filters from headers:
+---
+--- ``` text
+--- Available audio filters:
+---   lavfi            libavfilter bridge
+---   lavfi-bridge     libavfilter bridge (explicit options)
+--- ...
+--- Available libavfilter filters:
+---   abench           Benchmark part of a filtergraph.
+---   acompressor      Audio compressor.
+--- ```
+---
 ---@return string
-local function retreive_af_info_table()
+local function capture_af_help_output()
     -- mpv command to generate info
     local af_help_command = [[mpv --no-config --af=help]]
-    local af_help = os.capture(af_help_command)
+    local lines = os.capture(af_help_command, true) or { }
+
+    ---@type string[]
+    local filtered = { }
+    for i, line in ipairs(lines)
+    do
+        if line:match('^  %S')
+        then
+            filtered[#filtered + 1] = line:gsub('^  ', '')
+        end
+    end
+
+    return #filtered > 0
+        and table.concat(filtered, "\n")
+        or ""
 end
 
 local function print_af_help()
-    msg.warn('[get-af-help] Unimplemented (possibly removed)')
+    _G.log_add('', tostring(capture_af_help_output()))
 end
---- mp.register_script_message('get-af-help', print_af_help)
+
 script_messages.register('get-af-help', print_af_help)
-
----
---- Spew audio devices
----
----@param text string
-local function audio_devices(text)
-    plist = mp.get_property_osd("audio-device-list")
-    --print(plist)
-    utils.to_string(plist)
-end
-
--- List (read: spew) audio devices
---- mp.register_script_message('print-devices', function(text)
-script_messages.register('print-devices', function(text) audio_devices() end)
-
----
---- Loads script with the filename supplied via `script_name` argument.
---- Will attempt to remove lua file extension.
---- Currently no error checking as it won't crash the repl++ script,
---- but completion would be p great.
----
--- ---@ param script_name string
--- function load_mpv_script(script_name, keep_extension)
---     local plist = mp.get_property_osd("audio-device-list", '')
---     --print(plist)
---     utils_to_string(plist)
--- end
-
----
---- List (read: spew) audio devices
----
---- mp.register_script_message('print-devices', function(text)
-script_messages.register('print-devices', function(text)
-    audio_devices()
-end)
 
 --region    List macros
 
 -- Pattern checking for flag to show definitions in output
+-- @TODO: Lua doesn't support this kind of regex lol
 local print_macros_with_def_flag_pattern = [[^(-d|--defs?|defs?|definitions?)$]]
+local pm_log = msg.extend('!print-macros')
 
 ---@param  first string
 ---@vararg       string
@@ -844,30 +771,35 @@ local function print_macros(first, ...)
         and #first > 0
         and (print_macros_with_def_flag_pattern:match(first) ~= nil)
 
-    if display_macro_defs then
-        msg.debug(string.format([[`%s` flag passed, listing macro definitions.]], first))
+    if display_macro_defs
+    then
+        pm_log.debug([[`%s` flag passed, listing macro definitions.]], first)
     end
 
     local macro_list = {}
 
     -- Filter macros using arg as search term
     local filter = false
-    if display_macro_defs then
+    if display_macro_defs
+    then
         local next = ...
         if next and type(next) == "string" then filter = next end
     else
         if first and type(first) == "string" then filter = first end
     end
 
-    msg.debug(string.format('Filter: %s', tostring(filter)))
+    pm_log.debug('Filter: %s', tostring(filter))
 
-    if type(filter) == "string" then
-        msg.debug([[Filtering macros matching string `]] .. filter .. [[`]])
-        for symbol, _ in pairs(_G.macros) do
+    if type(filter) == "string"
+    then
+        pm_log.debug([[Filtering macros matching string `%s`]], filter)
+        for symbol, _ in pairs(_G.macros)
+        do
             -- NOTE: Moved to regex matching
             local found = (symbol:match(filter) and true or false)
-            if found then
-                msg.debug([[Adding ]]..symbol..[[ to display list.]])
+            if found
+            then
+                pm_log.debug([[Adding ]]..symbol..[[ to display list.]])
                 macro_list[symbol] = macros[symbol]
             end
         end
@@ -882,43 +814,42 @@ local function print_macros(first, ...)
 
     -- Functions for each listing mode
     local function print_macro_symbol_and_value(macro_symbol, macro_value)
-
         log_add( '{\\1c&H' .. macro_color .. '&}',
                     string.format("%s:\n", macro_symbol)  )
         log_add( '{\\1c&H' .. value_color .. '&}',
                     string.format("%s\n",  macro_value)   )
-
     end
-    local function print_macro_symbol(macro_symbol)
 
+    local function print_macro_symbol(macro_symbol)
         log_add( '{\\1c&H' .. macro_color .. '&}',
                     string.format("%s\n", macro_symbol)  )
-
     end
 
     -- Apply appropriate function for context
-    local print_macro = (display_macro_defs and print_macro_symbol_and_value or print_macro_symbol)
+    local print_macro = display_macro_defs
+        and print_macro_symbol_and_value
+        or  print_macro_symbol
 
     -- Iterate through macros
     -- Should make this a class w/ fields now
-    for macro_symbol, macro_value in pairs(macro_list) do
-        msg.debug(macro_symbol..": \n"..macro_value)
+    for macro_symbol, macro_value in pairs(macro_list)
+    do
+        pm_log.debug(macro_symbol..": \n"..macro_value)
 
         print_macro(macro_symbol, macro_value)
     end
 
     -- Update repl on completion
-    update()
+    _G.update()
 end
 
---- mp.register_script_message('macros', function(...)
-script_messages.register('macros', function(...)
-    print_macros(...)
-end)
+script_messages.register('macros',  print_macros)
 
 --endregion List macros
 
 --region Expand macro into prompt buffer
+
+local log = msg.extend('expand_macro')
 
 ---@param  token string
 ---@return       string
@@ -930,14 +861,16 @@ local function expand_macro(token)
     -- -- Check macro table for exact match and return its value if found
     local macros = _G.macros
 
-    msg.debug('[expand_macro] Indexing through macro list for `' .. token .. '`')
+    log.debug('Indexing through macro list for `%s`', token)
     local itr = 1
-    for symbol, _ in pairs(macros) do
+    for symbol, _ in pairs(macros)
+    do
         local debug_prefix = '[expand_macro]  [' .. itr .. '] '
-        msg.trace(debug_prefix..[[ => `]] .. symbol .. [[`]])
+        log.trace([[%s => `%s`]], itr, symbol)
         -- NOTE: Moved to regex matching
-        if symbol == token then
-            msg.trace(debug_prefix..[[Detected matching macro: `]]..symbol..[[` == `]]..token..[[`, returning.]])
+        if symbol == token
+        then
+            log.trace([[%s => `%s` Detected matching macro: `%s` == `%s` returning.]], itr, symbol, symbol, token)
             return macros[symbol]
         end
 
@@ -945,19 +878,20 @@ local function expand_macro(token)
     end
 end
 
+local dbg = Prefix.msg_method('type_macro', 'trace')
 ---
 ---@param token string
 local function type_macro(token)
-    local dbg = Prefix.msg_method('type_macro', 'trace')
-    dbg(string.format('Checking for macro with symbol "%s"', token))
+    dbg('Checking for macro with symbol "%s"', token)
 
     if not token or type(token) ~= "string" then return end
 
     local expansion = expand_macro(token)
-    if type(expansion) ~= "string" then expansion = "" end
+    if is.String(expansion) then expansion = "" end
 
-    if #expansion > 0 then
-        dbg(string.format('Typing expansion of given macro symbol "%s" into console with type script-message.', token))
+    if #expansion > 0
+    then
+        dbg('Typing expansion of given macro symbol "%s" into console with type script-message.', token)
         mp.commandv('script-message-to', 'console', 'type', expansion)
     else
         local style = '{\\1c&H66ccff&}'
@@ -967,15 +901,15 @@ local function type_macro(token)
 end
 
 --- mp.register_script_message('macro-expand', type_macro)
-script_messages.register('macro-expand', function(token) return type_macro(token) end)
-script_messages.register('type-macro',   function(token) return type_macro(token) end)
+script_messages.register('macro-expand', type_macro)
+script_messages.register('type-macro',   type_macro)
 
 --endregion Expand macro into prompt buffer
 
 --region Reload
 
 local log = Prefix.fmsg('reload_resume')
--- special thanks to reload.lua (https://github.com/4e6/mpv-reload/)
+-- Based on reload.lua (https://github.com/4e6/mpv-reload/)
 local function reload_resume()
     log.debug('Starting reload procedure')
 
@@ -1004,175 +938,129 @@ script_messages.register('reload', reload_resume)
 
 --endregion Reload
 
---region Debug print function
-
-function pdbg(toPrint)
-    local function pdbg_rec(toPrint)
-        if type(toPrint) == "table" then
-            for _, p in ipairs(toPrint) do pdbg_rec(p) end
-        else
-            log_add('{\\1c&H66ccff&}', toPrint)
-        end
-    end
-    if type(toPrint) == "table" then
-        msg.debug('pdbg: Printing table')
-        for n, p in ipairs(toPrint) do
-            if type(p) == "table" then
-                log_add('{\\1c&H66ccff&}', to_string(n) )
-                -- log_add('{\\1c&H66ffcc&}', table2string(toPrint) ) --#ffcc66 #cc66ff #66ffcc
-                log_add('{\\1c&H66ffcc&}', utils.format_table(toPrint) ) --#ffcc66 #cc66ff #66ffcc
-                -- pdbg_rec(p)
-            end
-        end
-    else
-        msg.debug('pdbg: Printing string')
-        log_add('{\\1c&H66ccff&}', toPrint)
-    end
-    update()
-end
-
---endregion Debug print function
-
----
---- Native debug print function test
----
----@param toPrint string
-function utils_to_string( toPrint )
-    local selectPrint = utils.parse_json( utils.to_string(toPrint) )
-    if selectPrint < 0 then
-        selectPrint = utils.to_string(toPrint) .. " "
-    end
-    log_add( '{\\1c&H66ccff&}', "utils_to_string output: " .. selectPrint .. "\n" )
-    pdbg(selectPrint)
-    -- log_add( '{\\1c&H66ccff&}', "utils_to_string output: " .. selectPrint .. "\n" )
-    --    log_add( '{\\1c&H66ccff&}', "utils_to_string output: " .. utils.to_string(toPrint)                                     .. "\n" )
-end
---
-
+local log = msg.extend('get-set-log')
 ---
 --- repl draw setting get/set
 ---
 ---@param msg string
-local function log_get_set(msg)
-    local style = get_set_style or ''
-    log_add(style, msg)
+---@param level? MsgLevel
+local function log_get_set(msg, level)
+    if level and is.Function(mp.msg[level])
+    then
+        log[level](msg)
+    else
+        local style = get_set_style or ''
+        log_add(style, msg)
+    end
 end
+
+-- @TODO: (Semantically,) not a big fan of `get` for printing/displaying info to console, would get
+--        weird if `get` was ever used properly. `print` or `show` would be better but `get`/`set`
+--        as a pair feels better
 
 ---
 --- Show/Set console font size
 ---
-function get_console_font_size()
-    log_get_set("Console font size: " .. opts.font_size .. "\n" )
-    update()
+local function get_console_font_size()
+    log_get_set(("Console font size: %s\n"):format(opts.font_size))
+    _G.update()
 end
 
 local console_font_size_interval = 1
+local console_font_size_floor    = 2
 ---
 --- Update font size of console output, accepts a positive integer, or `++`/`--` as shorthands
 --- for incrementing size up and down by an interval (1, hfor now)
 ---
 ---@param text string
-function set_console_font_size(text)
-    if     text == '++'
+local function set_console_font_size(text)
+    if text == '++'
     then
-        opts.font_size = math.max(1, opts.font_size + 1)
-        log_get_set("Console font size: " .. opts.font_size .. "\n" )
+        opts.font_size = math.max(console_font_size_floor, opts.font_size + 1)
+        log_get_set(("Console font size: %s"):format(opts.font_size), 'debug')
+
     elseif text == '--'
     then
-        opts.font_size = math.max(1, opts.font_size - 1)
-        log_get_set("Console font size: " .. opts.font_size .. "\n" )
+        opts.font_size = math.max(console_font_size_floor, opts.font_size - 1)
+        log_get_set(("Console font size: %s"):format(opts.font_size), 'debug')
+
     elseif tonumber(text) ~= nil
     then
         opts.font_size = tonumber(text)
-        log_get_set("Console font size: " .. opts.font_size .. "\n" )
+        log_get_set(("Console font size: %s"):format(opts.font_size), 'debug')
+
     else
         log_add( '{\\1c&H66CCFF&}', text .. " is not a number.\n" )
+
     end
 
-    update()
+    _G.update()
 end
 
---- mp.register_script_message('get-console-size', get_console_font_size)
 script_messages.register('get-console-size', get_console_font_size)
+script_messages.register('set-console-size', set_console_font_size)
 
---- mp.register_script_message('set-console-size', function(text) set_console_font_size(text) end)
-script_messages.register('set-console-size', function(text) set_console_font_size(text) end)
-
---- mp.register_script_message('console-size', function(text)
 script_messages.register('console-size', function(text)
-    if text then set_console_font_size(text)
-            else get_console_font_size()
+    if text
+    then
+        set_console_font_size(text)
+    else
+        get_console_font_size()
     end
 end)
 
 ---
 --- Display console font name
 ---
-function get_console_font_name()
+local function show_console_font_name()
     log_get_set(string.format("Console font: %s\n", opts.font))
-    update()
+    _G.update()
 end
 
 ---
 --- Set console font name
 ---
-function set_console_font_name(text)
+local function set_console_font_name(text)
     opts.font = text or opts.font
     log_get_set(string.format("Console font: %s\n", opts.font))
-    update()
+    _G.update()
 end
 
---- mp.register_script_message('get-console-font', function(text)
-script_messages.register('get-console-font', function(text)
-    get_console_font_name()
-end)
+script_messages.register('get-console-font', show_console_font_name)
+script_messages.register('set-console-font', set_console_font_name)
 
---- mp.register_script_message('set-console-font', function(text)
-script_messages.register('set-console-font', function(text)
-    set_console_font_name(text)
-end)
-
---- mp.register_script_message('console-font', function(text)
 script_messages.register('console-font', function(text)
     if text then set_console_font_name(text)
-            else get_console_font_name()
+            else show_console_font_name()
     end
 end)
 
---- mp.register_script_message('reload-macros', function()
 script_messages.register('reload-macros', function()
-    local success = reload_macros()
-    local cmd = ( success and [[print-text "[reload-macros] macros updated."]]
-                            or  [[print-text "[reload-macros] Updating macros failed."]] )
+    local success = macro.instance.reload_macros()
+    local cmd = success and [[print-text "[reload-macros] macros updated."]]
+                        or  [[print-text "[reload-macros] Updating macros failed."]]
     mp.command(cmd)
 end)
 
--- Idiot checking
---- mp.register_script_message('debug-macro', function(token)
-script_messages.register('debug-macro', function(token)
-    local global_macros = _G.macros
-    msg.info('_G.macros: ' .. type(global_macros))
-
-    local outer_macros = macros
-    msg.info('macros: ' .. type(outer_macros))
-end)
-
 -- Temporary wrapper for running macros until I can fix the main eval system
---- mp.register_script_message('run-macro', function(token)
+-- @NOTE Removable now?
+local rm_log = msg.extend('!run-macro')
 script_messages.register('run-macro', function(token)
     if type(_G.macros) ~= "table" or #macros < 1
     then
-        msg.warn("[!run-macro] Macros table empty or non-table type.")
-        for k, v in ipairs(_G.macros) do
-            msg.warn(tostring(k) .. ": '" .. v .. "'")
+        rm_log.warn("Macros table empty or non-table type.")
+        for k, v in ipairs(_G.macros)
+        do
+            rm_log.warn("%s: '%s'", tostring(k), v)
         end
         return
     end
 
     local expanded = expand_macro(token)
-    msg.trace(string.format('[!run-macro] Expanded macro "%s" to "%s"', token, tostring(expanded)))
-    if #expanded >= 1 then
-        msg.trace(string.format('[!run-macro] Running expanded command: "%s"', expanded))
+    rm_log.trace('Expanded macro "%s" to "%s"', token, tostring(expanded))
+    if #expanded >= 1
+    then
+        rm_log.trace('Running expanded command: "%s"', expanded)
         mp.command(expanded)
     end
 end)
@@ -1189,7 +1077,7 @@ local function log_line(str, alt_log_color)
     _log( "\n" )
 end
 
-function dbg_etc(text, alt_log_color)
+local function dbg_etc(text, alt_log_color)
     local alt_log_color = alt_log_color or "FFCC55" --#55CCFF #55FFCC #FFCC55 #FF55CC #CCFF55 #CC55FF
 
     log_line( text, alt_log_color )
@@ -1199,16 +1087,26 @@ end
 
 --endregion builtin macros function
 
-return { get_type = get_type,
-         eval_line = eval_line,
-         preprocess_line = preprocess_line,
-         cons_line = cons_line,
-         print_line = print_line,
-         cycle_line = cycle_line,
-         get_macros = macro.instance.get_current_macros,
-         reload_macros = reload_macros,
-         macros = _G.macros,
-         set_console_font_size = set_console_font_size,
-         set_console_font_name = set_console_font_name,
-         get_console_font_size = get_console_font_size,
-         get_console_font_name = get_console_font_name  }
+--region Fennel Command Scripts
+
+require('commands.log-hooks')
+require('commands.print-native')
+require('commands.rotate-to-fit')
+
+--endregion Fennel Command Scripts
+
+-- @TODO: Refactor module exports, and move each to original declaration (or at least under it) if
+--        possible
+
+M.get_type              = get_type
+
+M.eval_line             = eval_line
+M.preprocess_line       = preprocess_line
+M.cons_line             = cons_line
+M.print_line            = print_line
+M.cycle_line            = cycle_line
+
+M.get_macros            = macro.instance.get_current_macros
+M.macros                = _G.macros
+
+return M
