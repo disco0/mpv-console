@@ -212,7 +212,7 @@ package_path_patch.options =
 
             ---@param  first string
             ---@return       nil
-            local function add_path_match(first) table.insert(paths, first) end
+            local function add_path_match(first) paths[#paths + 1] = first end
 
             package_path:gsub("([^;]+)([;]?)", add_path_match)
 
@@ -279,7 +279,8 @@ package_path_patch.options =
                 -- @NOTE: Will break if paths need to be inserted anywhere else)
                 for i, path in ipairs(script_dir_require_patterns)
                 do
-                    table.insert(package_paths, i, path)
+                    -- table.insert(package_paths, i, path)
+                    package_paths[i] = path
                 end
             end
 
@@ -294,7 +295,8 @@ package_path_patch.options =
                 if seen[path] == nil
                 then
                     seen[path] = true
-                    table.insert(deduped, path)
+                    -- table.insert(deduped, path)
+                    deduped[#deduped + 1] = path
                 end
             end
             package_paths = deduped
@@ -488,9 +490,9 @@ _G.update_timer:kill()
 --endregion Script Global State
 
 
-utils.shared_script_property_observe("osc-margins",
-  function(_, val)
-    if val then
+utils.shared_script_property_observe("osc-margins", function(_, val)
+    if val
+    then
         -- formatted as "%f,%f,%f,%f" with left, right, top, bottom, each
         -- value being the border size as ratio of the window size (0.0-1.0)
         local vals = { }
@@ -504,7 +506,8 @@ utils.shared_script_property_observe("osc-margins",
     ptty.update()
 end)
 
--- Set the Console visibility ("enable", Esc)
+---
+--- Set the Console visibility ("enable" script-message, Esc key, etc.)
 ---@param active? boolean
 local function set_active(active)
     if active == ptty.active then return end
@@ -714,8 +717,8 @@ local function help_command_extended(param)
     local cmdlist = mp.get_property_native('command-list')
 
     -- Styles
-    local cmd_style   = '{\\1c&H' .. "FFAD4C" .. '&}'
-    local error_style = '{\\1c&H' .. "7a77f2" .. '&}'
+    local cmd_style   = '{\\1c&HFFAD4C&}'
+    local error_style = '{\\1c&H7A77F2&}'
 
     local output = ''
 
@@ -784,7 +787,7 @@ local function help_command_extended(param)
 end
 
 script_messages.register('help', help_command_extended)
-script_messages.register('?', help_command_extended)
+script_messages.register('?',    help_command_extended)
 
 --- Format perf sample for output
 ---@param memory number | PerfEventEntry
@@ -806,12 +809,12 @@ end
 script_messages.register('mem', function()
     -- Record fresh sample
     Perf.record('mem script-message call')
-    M.log_add_advanced({
+    ptty.log_add_advanced({
         {
             style = "{\\1c&HCCCCCC&}",
             text = string.format('Memory Usage: %s', format_perf_memory(Perf.last.memory))
         },
-        LOG_FRAGMENT.NEW_LINE
+        ptty.LOG_FRAGMENT.NEW_LINE
     }, false)
 end)
 
@@ -1886,7 +1889,8 @@ function get_all_completions(part, list)
             -- If completion value does not exactly equal the input part (part is prefix of completion)
             if candidate ~= part
             then
-                table.insert(partials, candidate)
+                -- table.insert(partials, candidate)
+                partials[#partials + 1] = candidate
             else
                 exact = candidate
             end
@@ -2019,7 +2023,8 @@ local function complete()
                             local fragment_idx = 0
                             while fragment_idx <= comp_fragment_limit
                             do
-                                table.insert(limited_partials, fragment_idx, partials_to_complete[fragment_idx])
+                                -- table.insert(limited_partials, fragment_idx, partials_to_complete[fragment_idx])
+                                limited_partials[fragment_idx] = partials_to_complete[fragment_idx]
                                 fragment_idx = fragment_idx + 1
                             end
                             partials_to_complete = limited_partials
@@ -2170,11 +2175,11 @@ local function get_bindings()
         { 'end',         _G.go_end                              },
         { 'pgup',        _G.handle_pgup                         },
         { 'pgdwn',       _G.handle_pgdown                       },
-        { 'ctrl+c',      clear_input                                  },
+        { 'ctrl+c',      clear_input                            },
         { 'ctrl+d',      close_console_if_empty                 },
-        { 'ctrl+k',      _G.del_to_eol                             },
+        { 'ctrl+k',      ptty.del_to_eol                        },
         { 'ctrl+l',      clear_log_buffer                       },
-        { 'ctrl+u',      _G.del_to_start                           },
+        { 'ctrl+u',      ptty.del_to_start                      },
         { 'ctrl+v',      bind1(paste, true)                     },
         { 'meta+v',      bind1(paste, true)                     },
         { 'ctrl+w',      _G.del_word                            },
@@ -2240,6 +2245,7 @@ end
 
 function _G.define_key_bindings()
     if #_G.key_bindings > 0 then return end
+
     for _, bind in ipairs(get_bindings())
     do
         -- Generate arbitrary name for removing the bindings later.
