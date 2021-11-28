@@ -29,7 +29,7 @@ local function trim_end(str) return (str or ''):gsub('%s+$', '') end
 
 --endregion Generation Utils
 
---region Macro Building Utils
+--region Macro Building Components
 
 -- @TODO Build a expression builder that combines statements/strings for
 -- concatenation, quoting, and eventual output for a macro definition
@@ -127,6 +127,6 @@ function M.raw_quote(...)
     return string.format([[%q]], table.concat({[[$>]], ...}, raw_quote_concat_str))
 end
 
---endregion Macro Building Utils
+--endregion Macro Building Components
 
 return M

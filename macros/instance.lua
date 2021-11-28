@@ -99,7 +99,7 @@ function M.reload_macros()
     local newmacros = M.read_macro_file()
     if not is.Table(newmacros)
     then
-        log.error([[Error at macro file load: resulting value from reading macro file is not a table.]])
+        log.error([[Error at macro file load: resulting value from reading macro file is not a table. (Value Type: %s)]], type(newmacros))
         return false
     end
 
