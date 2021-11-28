@@ -173,7 +173,7 @@ package_path_patch.options =
             msg.debug(
                 (#message > 0
                     and '[package.path] ' .. tostring(message):format(...))
-                    or '[package.path]')
+                    or  '[package.path]')
         end
 
         if not package_path_patch.options.debug_logging
@@ -198,11 +198,11 @@ package_path_patch.options =
 
             if type(package_path) ~= 'string' or #package_path < 1
             then
-                error(string.format(
-                    '[get_package_paths] package.path or package_path parameter is not a string, or is empty (value: %s = "%s")',
+                error(('[get_package_paths] package.path or package_path parameter is not a string, or is empty (value: %s = "%s")')
+                    :format(
                         type(package_path),
                         tostring(package_path)
-                ))
+                    ))
             end
 
             --endregion Resolve Parameters
@@ -233,11 +233,12 @@ package_path_patch.options =
             if #mpv_config_dir == 0
             then
                 msg.warn(
-                    ('%s Failed to resolve mpv configuration path: (mpv_base?: %s => %s)'):format(
-                        '[package.path]',
-                        type(mpv_config_dir),
-                        tostring(mpv_config_dir)
-                    ))
+                    ('%s Failed to resolve mpv configuration path: (mpv_base?: %s => %s)')
+                        :format(
+                            '[package.path]',
+                            type(mpv_config_dir),
+                            tostring(mpv_config_dir)
+                        ))
 
                 return
             end
@@ -338,28 +339,16 @@ local ptty = require('ptty')
 
 --endregion Imports
 
---region Localize
-
-local format = string.format
-
---endregion Localize
-
 --region Util
 
 --region Util - Arrays
 
 ---
----@param str_arr string[]
----@return string, number
+---@param  str_arr string[]
+---@return         string, number
 local function longest(str_arr)
     local idx = 1
     local total = #str_arr
-
-    -- msg.debug('[longest] Array elements:')
-    -- for i, v in ipairs(str_arr) do
-    --     msg.debug('[longest]  #' .. i .. '  ' .. tostring(v))
-    -- end
-    -- print(str_arr)
 
     if total < 1
     then
@@ -434,18 +423,72 @@ local opts = Options.options
 -- Apply user-set options
 options.read_options(opts)
 
-if(opts.font:find('Iosevka'))
-then
+--region Iosevka Fix
+
+---@type FontFixListener
+local font_fix_listener = { }
+
+do  ---@class FontFixListener
+    local M = { }
     local log = msg.extend('osd/libass')
-    log.debug('Adding osd/libass exception for Iosevka font bug.')
 
-    local orig = mp.get_property_native('msg-level', { })
-    log.debug('Intital native msg-level value: %s', utils.to_string(orig))
+    local function listener()
+        local value = mp.get_property_native('msg-level', { })
 
-    orig['osd/libass'] = 'never'
-    mp.set_property_native('msg-level', orig)
-    log.debug('Updated native msg-level value: %s', utils.to_string(orig))
+        if M.check_targeted_font()
+            -- Just check if its set, for now
+            and type(value['osd/libass']) == 'string'
+        then
+            return
+        end
+
+        log.debug('Adding osd/libass exception for Iosevka font bug.')
+        -- M.log.debug('Intital native msg-level value: %s', utils.to_string(orig))
+
+        --region set_property_native
+
+        -- Apparently may have issues, keeping this version of updating here for
+        --[[
+            value['osd/libass'] = 'never'
+
+            mp.set_property_native('msg-level', value)
+
+            log.debug('Updated native msg-level value: %s', utils.to_string(mp.get_property_native('msg-level', { })))
+        ]]--
+
+        --endregion set_property_native
+
+        local str_value = mp.get_property('msg-level', "")
+        str_value = str_value
+                .. (#str_value > 0 and ',' or '')
+                .. 'osd/libass=no'
+
+        mp.set_property('msg-level', str_value)
+
+        log.debug('Updated native msg-level value: %s',
+            utils.to_string(mp.get_property_native('msg-level', { })))
+    end
+
+    function M.register()
+        mp.observe_property('msg-level', "native", listener)
+    end
+
+    function M.unregister() mp.unobserve_property(listener) end
+
+    --- @TODO: Integrate into a mp.options.read_options callback parameter, so this can register
+    ---        iff relevant font is used (atm used to check in property observation)
+    ---@return boolean
+    function M.check_targeted_font()
+        local font = opts.font
+        return type(font) == 'string' and font:find('Iosevka')
+    end
+
+    font_fix_listener = M
 end
+
+font_fix_listener.register()
+
+--endregion Iosevka Fix
 
 --endregion Initialize Options
 
@@ -496,7 +539,8 @@ utils.shared_script_property_observe("osc-margins", function(_, val)
         -- formatted as "%f,%f,%f,%f" with left, right, top, bottom, each
         -- value being the border size as ratio of the window size (0.0-1.0)
         local vals = { }
-        for v in string.gmatch(val, "[^,]+") do
+        for v in string.gmatch(val, "[^,]+")
+        do
             vals[#vals + 1] = tonumber(v)
         end
         ptty.global_margin_y = vals[4] -- bottom
@@ -524,6 +568,7 @@ local function set_active(active)
         mp.enable_messages('silent:terminal-default')
         collectgarbage()
     end
+
     ptty.update()
 end
 
@@ -556,8 +601,8 @@ local function show_and_type(text, eval_immediately)
         _G.history_orig[#_G.history_orig + 1] = ptty.line
     end
 
-    ptty.line = text
-    ptty.cursor = ptty.line:len() + 1
+    ptty.line   = text
+    ptty.cursor = text:len() + 1
     _G.history_pos = #_G.history_orig + 1
     _G.insert_mode = false
 
@@ -710,7 +755,7 @@ local function help_command_extended(param)
         -- Now it can be set to a string
         param = ''
     else
-        log.debug(string.format('`param` equals: `%s`', tostring(param)))
+        log.debug(('`param` equals: `%s`'):format(tostring(param)))
     end
 
     ---@type CommandList
@@ -744,7 +789,7 @@ local function help_command_extended(param)
             output = output  .. '  ' .. cmd.name
         end
 
-        output = format('%s\n%s\n%s\n',
+        output = ('%s\n%s\n%s\n'):format(
             output,
             'Use "help command" to show information about a command.',
             "ESC or Ctrl+d exits the console.")
@@ -812,7 +857,7 @@ script_messages.register('mem', function()
     ptty.log_add_advanced({
         {
             style = "{\\1c&HCCCCCC&}",
-            text = string.format('Memory Usage: %s', format_perf_memory(Perf.last.memory))
+            text = ('Memory Usage: %s'):format(format_perf_memory(Perf.last.memory))
         },
         ptty.LOG_FRAGMENT.NEW_LINE
     }, false)
@@ -896,9 +941,11 @@ local function handle_char_input(c)
 
     if _G.insert_mode == true
     then
-        ptty.line = ptty.line:sub(1, ptty.cursor - 1) .. c .. ptty.line:sub(next_utf8(ptty.line, ptty.cursor))
+        ptty.line = ptty.line:sub(1, ptty.cursor - 1)
+            .. c .. ptty.line:sub(next_utf8(ptty.line, ptty.cursor))
     else
-        ptty.line = ptty.line:sub(1, ptty.cursor - 1) .. c .. ptty.line:sub(ptty.cursor)
+        ptty.line = ptty.line:sub(1, ptty.cursor - 1)
+            .. c .. ptty.line:sub(ptty.cursor)
     end
 
     ptty.cursor = ptty.cursor + #c
@@ -921,8 +968,8 @@ end
 local function handle_backspace()
     if ptty.cursor <= 1 then return end
 
-    local prev = prev_utf8(ptty.line, ptty.cursor)
-    ptty.line = ptty.line:sub(1, prev - 1) .. ptty.line:sub(ptty.cursor)
+    local prev  = prev_utf8(ptty.line, ptty.cursor)
+    ptty.line   = ptty.line:sub(1, prev - 1) .. ptty.line:sub(ptty.cursor)
     ptty.cursor = prev
     ptty.update()
 end
@@ -930,8 +977,10 @@ end
 --- Remove the character in front of the cursor (Del)
 local function handle_del()
     if ptty.cursor > ptty.line:len() then return end
+
     ptty.line = ptty.line:sub(1, ptty.cursor - 1)
-                .. ptty.line:sub(next_utf8(ptty.line, ptty.cursor))
+             .. ptty.line:sub(next_utf8(ptty.line, ptty.cursor))
+
     ptty.update()
 end
 
@@ -942,34 +991,39 @@ end
 
 --- Clear the current line (Ctrl+C)
 local function clear_input()
-    ptty.line        = ''
-    ptty.cursor      = 1
+    ptty.line      = ''
+    ptty.cursor    = 1
+
     _G.insert_mode = false
     _G.history_pos = #_G.history_orig + 1
+
     ptty.update()
 end
 
 --- Delete from the cursor to the end of the word (Ctrl+W)
 function _G.del_word()
     local before_cur = ptty.line:sub(1, ptty.cursor - 1)
-    local after_cur = ptty.line:sub(ptty.cursor)
+    local after_cur  = ptty.line:sub(ptty.cursor)
 
-    before_cur = before_cur:gsub('[^%s]+%s*$', '', 1)
-    ptty.line = before_cur .. after_cur
+    before_cur  = before_cur:gsub('[^%s]+%s*$', '', 1)
+    ptty.line   = before_cur .. after_cur
     ptty.cursor = before_cur:len() + 1
+
     ptty.update()
 end
 
 --- Delete from the cursor to the end of the line (Ctrl+K)
 function _G.del_to_eol()
     ptty.line = ptty.line:sub(1, ptty.cursor - 1)
+
     ptty.update()
 end
 
 --- Delete from the cursor back to the start of the line (Ctrl+U)
 function _G.del_to_start()
-    ptty.line = ptty.line:sub(ptty.cursor)
+    ptty.line   = ptty.line:sub(ptty.cursor)
     ptty.cursor = 1
+
     ptty.update()
 end
 
@@ -1013,7 +1067,8 @@ local function go_history(new_pos, no_update)
     if new_pos == old_pos
     then
         log.debug('No material change in history position (%s -> %s)',
-            tostring(old_pos), tostring(new_pos))
+            tostring(old_pos),
+            tostring(new_pos))
         return
     end
 
@@ -2139,62 +2194,68 @@ end
 -- List of input bindings. This is a weird mashup between common GUI text-input
 -- bindings and readline bindings.
 local function get_bindings()
-    -- Check if this explodes
-    local bind1, thunk = nil, nil
-    do local M = require[[fn]]
-        bind1, thunk = M.bind1, M.thunk
+    local fn = require[[fn]]
+    local bind1 = fn.bind1
+    local thunk = fn.thunk
+
+    ---@param direction boolean Increases font with true, decreases with false.
+    local con_sizer = function(direction)
+        mp.command_native({
+            [[script-message]], [[console-size]], direction and [[++]] or [[--]] })
     end
+    local inc_console_size = bind1(con_sizer, true)
+    local dec_console_size = bind1(con_sizer, false)
 
     local noop = function() end
 
     local bindings =
     {
         { 'esc',         bind1(set_active, false) },
-        { 'enter',       _G.handle_enter                        },
-        { 'kp_enter',    _G.handle_enter                        },
-        { 'shift+enter', bind1(handle_char_input,'\n')          },
-        { 'bs',          handle_backspace                       },
-        { 'shift+bs',    handle_backspace                       },
-        { 'del',         handle_del                             },
-        { 'shift+del',   handle_del                             },
-        { 'ins',         handle_ins                             },
-        { 'shift+ins',   bind1(paste, false)                    },
-        { 'mbtn_mid',    bind1(paste, false)                    },
-        { 'left',        thunk(_G.prev_char)                    },
-        { 'right',       thunk(_G.next_char)                    },
-        { 'up',          thunk(go_history_prefix_backward)      }, -- { 'up',          function() move_history(-1) end        },
-        { 'wheel_up',    bind1(move_history, -1)                },
-        { 'down',        thunk(go_history_prefix_forward)       }, -- { 'down',        function() move_history(1) end         },
-        { 'wheel_down',  bind1(move_history, 1)                 },
-        { 'wheel_left',  noop                                   },
-        { 'wheel_right', noop                                   },
-        { 'ctrl+left',   _G.prev_word                           },
-        { 'ctrl+right',  _G.next_word                           },
-        { 'tab',         complete                               },
-        { 'home',        _G.go_home                             },
-        { 'end',         _G.go_end                              },
-        { 'pgup',        _G.handle_pgup                         },
-        { 'pgdwn',       _G.handle_pgdown                       },
-        { 'ctrl+c',      clear_input                            },
-        { 'ctrl+d',      close_console_if_empty                 },
-        { 'ctrl+k',      ptty.del_to_eol                        },
-        { 'ctrl+l',      clear_log_buffer                       },
-        { 'ctrl+u',      ptty.del_to_start                      },
-        { 'ctrl+v',      bind1(paste, true)                     },
-        { 'meta+v',      bind1(paste, true)                     },
-        { 'ctrl+w',      _G.del_word                            },
-        { 'Ctrl+BS',     _G.del_word                            },
-        { 'Alt+BS',      _G.del_word                            },
+        { 'enter',       _G.handle_enter },
+        { 'kp_enter',    _G.handle_enter },
+        { 'shift+enter', bind1(handle_char_input,'\n') },
+        { 'bs',          handle_backspace },
+        { 'shift+bs',    handle_backspace },
+        { 'del',         handle_del },
+        { 'shift+del',   handle_del },
+        { 'ins',         handle_ins },
+        { 'shift+ins',   bind1(paste, false) },
+        { 'mbtn_mid',    bind1(paste, false) },
+        { 'left',        thunk(_G.prev_char) },
+        { 'right',       thunk(_G.next_char) },
+        { 'up',          thunk(go_history_prefix_backward) }, -- { 'up',          function() move_history(-1) end        },
+        { 'wheel_up',    bind1(move_history, -1) },
+        { 'down',        thunk(go_history_prefix_forward) }, -- { 'down',        function() move_history(1) end         },
+        { 'wheel_down',  bind1(move_history, 1) },
+        { 'wheel_left',  noop },
+        { 'wheel_right', noop },
+        { 'ctrl+left',   _G.prev_word },
+        { 'ctrl+right',  _G.next_word },
+        { 'tab',         complete },
+        { 'home',        _G.go_home },
+        { 'end',         _G.go_end },
+        { 'pgup',        _G.handle_pgup },
+        { 'pgdwn',       _G.handle_pgdown },
+        { 'ctrl+c',      clear_input },
+        { 'ctrl+d',      close_console_if_empty },
+        { 'ctrl+k',      ptty.del_to_eol },
+        { 'ctrl+l',      clear_log_buffer },
+        { 'ctrl+u',      ptty.del_to_start },
+        { 'ctrl+v',      bind1(paste, true) },
+        { 'meta+v',      bind1(paste, true) },
+        { 'ctrl+w',      _G.del_word },
+        { 'Ctrl+BS',     _G.del_word },
+        { 'Alt+BS',      _G.del_word },
         { 'kp_dec',      bind1(handle_char_input, '.') },
         -- Console output size ++/--
         -- macOS => cmd + =
         --          cmd + -
-        { 'Meta+=',      function() mp.commandv([[script-message]], [[console-size]], [[++]]) end },
-        { 'Meta+-',      function() mp.commandv([[script-message]], [[console-size]], [[--]]) end },
+        { 'Meta+=',      inc_console_size },
+        { 'Meta+-',      dec_console_size },
         -- win10 => ctrl + =
         --          ctrl + -
-        { 'ctrl+=',      function() mp.commandv([[script-message]], [[console-size]], [[++]]) end },
-        { 'ctrl+-',      function() mp.commandv([[script-message]], [[console-size]], [[--]]) end },
+        { 'ctrl+=',      inc_console_size },
+        { 'ctrl+-',      dec_console_size },
     }
 
     for i = 0, 9
@@ -2234,7 +2295,6 @@ do local M = { }
         end
         M.key_bindings = { }
     end
-
 
     Input = M
 end

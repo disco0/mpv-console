@@ -24,7 +24,7 @@ local msg = logging.msg
 
 local M = { }
 
---region Clipboard Command Definitions
+--region Windows Clipboard
 
 ---@alias WindowsClipboardBin '"pwsh"' | '"powershell"'
 
@@ -33,9 +33,6 @@ local M = { }
 ---@field public command              table<WindowsClipboardBin, string>
 ---@field public get_bin              fun(): WindowsClipboardBin | nil
 ---@field public get_subprocess_table fun(): string[]            | nil
-
---region Windows Clipboard
---endregion Windows Clipboard
 
 ---@type WindowsClipboardCommandUtil
 local win_clip = { }
@@ -113,73 +110,81 @@ win_clip =
     end
 }
 
+--endregion Windows Clipboard
+
 local log = msg.extend('get_clipboard')
+
 --- Returns a string of UTF-8 text from the clipboard (or the primary selection)
 ---@param  clip                 boolean | nil
 ---@param  returnErrorOnFailure boolean | nil
 ---@return                      string  | nil
 local function get_clipboard(clip, returnErrorOnFailure)
 
-    log.trace('Checking for clipboard procedure for current platform: ' .. tostring(platform))
-    if platform == 'x11' then
+    log.trace('Checking for clipboard procedure for current platform: %s', tostring(platform))
+
+    if platform == 'x11'
+    then
         local res = subprocess({
             args = { 'xclip', '-selection', clip and 'clipboard' or 'primary', '-out' },
             playback_only = false
         })
 
-        if not res.error then
+        if not res.error
+        then
             return res.stdout
         else
             log.warn('Clipboard command returned error: %s', tostring(res.error))
             return (returnErrorOnFailure == true and res.error) or nil
         end
-    end
-    if platform == 'wayland' then
+
+    elseif platform == 'wayland'
+    then
         local res = subprocess({
             args = { 'wl-paste', clip and '-n' or  '-np' },
             playback_only = false,
         })
 
-        if not res.error then
+        if not res.error
+        then
             return res.stdout
         else
             log.warn('Clipboard command returned error: %s', tostring(res.error))
         end
 
-    elseif platform == 'windows' then
-        -- local winpwsh = win_clip.windows.powershell
-        -- local powershell_bin = get_windows_pwsh_bin()
-        -- -- Use faster bin and command if wholesome 100 big chungus powershell
-        -- -- desktop compat unnecessary
-        -- local command = powershell_bin:starts_with('pwsh')
-        --                     and winpwsh.command.pwsh
-        --                     or  winpwsh.command.powershell
+    elseif platform == 'windows'
+    then
         local subprocess_params = win_clip.get_subprocess_table()
-        if subprocess_params == nil then
+        if subprocess_params == nil
+        then
             msg.error('Failed to resolve a subprocess parameter table, or possibly binary and argument set for Windows powershell/pwsh paste command.')
             return nil
         end
-        local res = subprocess(subprocess_params)
 
-        if not res.error then
+        local res = subprocess(subprocess_params)
+        if not res.error
+        then
             return res.stdout
         else
-            if type(res.stderr) == "string" then
+            if type(res.stderr) == "string"
+            then
                 log.error('Clipboard stderr:\n```%s\n```', res.stderr)
             end
+
             log.warn('Clipboard command returned error: ' .. tostring(res.error))
         end
 
-    elseif platform == 'macos' then
+    elseif platform == 'macos'
+    then
         local res = subprocess({
             args = { 'pbpaste' },
             playback_only = false,
         })
 
-        if not res.error then
+        if not res.error
+        then
             return res.stdout
         else
-            log.warn('Clipboard command returned error: ' .. tostring(res.error))
+            log.warn('Clipboard command returned error: %s', tostring(res.error))
         end
     end
 
@@ -188,6 +193,7 @@ local function get_clipboard(clip, returnErrorOnFailure)
 end
 
 local log = msg.extend('set_clipboard')
+
 local function set_clipboard(text)
     log.warn('Clipboard setter function unimplemented.')
 end
@@ -203,40 +209,3 @@ M.clipboard =
 }
 
 return M
-
--- ---@ return WindowsClipboardBin
--- local function get_windows_pwsh_bin()
---     if type(win_clip.resolved_bin) == "string" and #win_clip.resolved_bin > 0 then
---         return win_clip.resolved_bin
---     end
---     local res = subprocess({
---         args = { 'where.exe', 'pwsh.exe' },
---         playback_only = false
---     })
---     if res.status ~= 0 then
---         msg.debug('Shell command "where.exe pwsh.exe" returned non-zero exit code.')
---         win_clip.resolved_bin = 'powershell.exe'
---     else
---         msg.debug('Shell command "where.exe pwsh.exe" was successful')
---         win_clip.resolved_bin = 'pwsh.exe'
---     end
-
---     msg.debug('Storing resolved powershell command: ' .. win_clip.resolved_bin)
---     return win_clip.resolved_bin
--- end
-
--- win_clip.get_subprocess_table = function()
---     return (function(resolved_bin)
---         local resolved_comand = win_clip.command[resolved_bin]
---         if type(resolved_bin) == 'string' and resolved_command then
---             return {
---                 resolved_bin,
---                 '-NoProfile',
---                 '-NoLogo',
---                 '-Command',
---                 command
---             }
---         end
---     end)(get_windows_pwsh_bin())
--- end
---endregion Clipboard Command Definitions
