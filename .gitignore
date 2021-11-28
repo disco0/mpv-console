@@ -1,2 +1,2 @@
 # Commands are all transpiled from fennel files in commands/src
-./commands/*.lua
+commands/*.lua
