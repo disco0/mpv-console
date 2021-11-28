@@ -1,3 +1,4 @@
 # Commands are all transpiled from fennel files in commands/src
 /commands
 !/commands/src
+!/commands/macros

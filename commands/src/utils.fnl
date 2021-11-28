@@ -27,6 +27,14 @@
 
   { : command : name } )
 
+;; Allows for registering multiple commands at the same time, returning each passed command
+;; defined as an additional return value at the end of each script
+(λ M.initialize-commands [ ... ]
+  (let [ command-tables [ ] ]
+
+    ;; Return all
+    (values (table.unpack command-tables))))
+
 ;;#endregion Utils
 
 M
