@@ -1,12 +1,7 @@
-local M =
-{
-    _NAME = 'mpv-console-history',
-    _DESCRIPTION = ([[
-        Console command history state, configuration, and management functions.
-
-        @TODO Any function or variable used to configure/effect history shoud go in this submodule.
-    ]]):gsub('        ', '')
-}
+local M = setmetatable({ }, {
+_NAME = 'mpv-console-history',
+_DESCRIPTION = [[Console command history state, configuration, and management functions.]]
+})
 
 ---@alias HistoryEntry string
 

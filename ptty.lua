@@ -1,8 +1,6 @@
 local M = setmetatable({ }, {
 _NAME = 'console-ptty',
-_DESCRIPTION = [[
-Module for functionality related to drawing console.
-]]
+_DESCRIPTION = 'Module for functionality related to drawing console.'
 })
 
 local mp = require('mp')
@@ -148,7 +146,7 @@ function M.log_add_advanced(entry, wait)
 end
 
 --- Stores common LogLine fragments, for use with `log_add_advanced`.
-local LOG_FRAGMENT =
+M.LOG_FRAGMENT =
 {
     NEW_LINE = { text = "\n", style = "" }
 }

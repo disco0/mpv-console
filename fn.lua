@@ -1,14 +1,13 @@
-local M =
+local M = setmetatable({ }, {
+_NAME = 'Functional Library',
+_SOURCE =
 {
-    _NAME = 'Functional Library',
-    _SOURCE =
-    {
-        _URL = 'http://lua-users.org/wiki/FunctionalLibrary',
-        _AUTHOR = 'Shimomura Ikkei',
-        _DATE = '2005/05/18'
-    },
-    _DESCRIPTION = 'Module form of source file. Original description:\n"""\nPorting several convenience functional utilities form Haskell, Python etc..\n"""\n'
-}
+    _URL = 'http://lua-users.org/wiki/FunctionalLibrary',
+    _AUTHOR = 'Shimomura Ikkei',
+    _DATE = '2005/05/18'
+},
+_DESCRIPTION = 'Module form of source file. Original description:\n"""\nPorting several convenience functional utilities form Haskell, Python etc..\n"""\n'
+})
 
 ---
 --- ```lua

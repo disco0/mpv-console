@@ -1,8 +1,7 @@
-local M =
-{
-    _NAME = 'macro-building-utils',
-    _DESCRIPTION = 'DSL-like utility function set for building macros with multiple/nested statements.'
-}
+local M = setmetatable({ }, {
+_NAME = 'macro-building-utils',
+_DESCRIPTION = 'DSL-like utility function set for building macros with multiple/nested statements.'
+})
 
 --region Debugging
 

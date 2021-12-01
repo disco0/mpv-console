@@ -1,9 +1,8 @@
-local M =
-{
-    _NAME = 'console-macros-instance',
-    _DESCRIPTION = 'Contains state related functions and values for macros system.',
-    _VERSION = '0.0.1'
-}
+local M = setmetatable({ }, {
+_NAME = 'console-macros-instance',
+_DESCRIPTION = 'Contains state related functions and values for macros system.',
+_VERSION = '0.0.1'
+})
 
 --region Imports
 

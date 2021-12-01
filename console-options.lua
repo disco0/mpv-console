@@ -1,7 +1,6 @@
-local M =
-{
-    _NAME = 'Console Options'
-}
+local M = setmetatable({ }, {
+_NAME = 'Console Options'
+})
 
 local Const = require('constants')
 
@@ -19,7 +18,7 @@ M.options =
 
     --- Set the font size used for the Console and the console. This will be
     --- multiplied by "scale."
-    font_size = 16,
+    font_size = 8,
 
     -- Display total history entries/position in history in prompt prefix
     prompt_hist_pos = true,

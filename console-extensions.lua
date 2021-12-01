@@ -1,6 +1,7 @@
 local M = setmetatable({ }, {
 _NAME = 'console-extensions',
-_DESCRIPTION = [[Additional functions for mpv console script
+_DESCRIPTION = [[
+Additional functions for mpv console script
 Migrated from console2.lua extension, from original repl++ script for repl.lua
 
 "If console is so good why is there no console 2?"]]
@@ -19,7 +20,6 @@ local opts    = require('console-options').options
 local macro   = require('console.macros')
 local default_macro_table_factory = macro.util.defaults.get_default_macros
 local script_messages = require('script-message-tracker')
-
 local ptty    = require('ptty')
 
 --endregion Imports
@@ -692,7 +692,7 @@ local function pretty_print_nodes(property, filter)
         append { style = '',           text = '\n' }
 
         -- Push constructred complex log history item
-        log_add_advanced(entry)
+        ptty.log_add_advanced(entry)
     end
 end
 

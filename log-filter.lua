@@ -17,10 +17,10 @@
 ---@field level  MessageLevel
 ---@field text   string
 
-local utils = require('mp.utils')
+local utils   = require('mp.utils')
 local logging = require('log-ext')
 local ctx_log = logging.Prefix.fmsg
-local ib_log = logging.Prefix.fmsg('is_blacklist')
+local ib_log  = logging.Prefix.fmsg('is_blacklist')
 
 local script_name = mp.get_script_name()
 
@@ -91,7 +91,7 @@ local dprint = filter_trace.is_blacklisted_dprint
 
 --endregion ConsoleLogFilter tracing
 
-local ConsoleLogFilter = nil -- Predeclaration for self-reference
+local ConsoleLogFilter = nil
 ConsoleLogFilter =
 {
     trace_logging = false,
@@ -248,4 +248,6 @@ ConsoleLogFilter =
     end
 }
 
-return ConsoleLogFilter
+return setmetatable(ConsoleLogFilter, {
+_NAME = 'console-log-filter'
+})

@@ -1,7 +1,11 @@
 --region Environment
 
 local unpack = table.unpack or _G.unpack
-local pack   = _G.pack or table.pack or function(...) return {n = select('#', ...), ...} end
+---@generic T: any
+---@type fun(...: T): T[]
+local pack = ---@diagnostic disable-next-line
+    _G.pack or table.pack
+    or function(...) return {n = select('#', ...), ...} end
 
 --endregion Environment
 
@@ -30,13 +34,11 @@ local pack   = _G.pack or table.pack or function(...) return {n = select('#', ..
 
 --endregion Declarations
 
-local logging =
-{
-    _NAME        = 'log-ext',
-    _VERSION     = '0.1.2',
-    _DESCRIPTION = 'Extended logging for mpv scripts'
-    -- @TODO
-}
+local M = setmetatable({ }, {
+_NAME        = 'log-ext',
+_VERSION     = '0.1.2',
+_DESCRIPTION = 'Extended logging for mpv scripts'
+})
 
 --region Utils
 
@@ -107,7 +109,7 @@ do
     function msg_ext.ftrace(...)   PRIMORDIAL_msg.log('trace', safe_format(...)) end
 end
 
-logging.msg = msg_ext
+M.msg = msg_ext
 
 --endregion Extended msg
 
@@ -238,28 +240,28 @@ function Prefix.fmsg(header, ...)
     }
 end
 
-logging.msg.extend = Prefix.fmsg
+M.msg.extend = Prefix.fmsg
 
-logging.Prefix = Prefix
+M.Prefix = Prefix
 
 --region Default Header
 
 ---@type fmsg
-logging.base = logging.msg
+M.base = M.msg
 
 ---
 --- Update globlal
 ---
 ---@param  header string
-logging.update_base = function(header)
+M.update_base = function(header)
     assert(type(header) == 'string' and #header > 0,
         "`header` parameter is a string with at least one character.")
 
-    logging.base = Prefix.fmsg(header)
+    M.base = Prefix.fmsg(header)
 end
 
 --endregion Default Header
 
 --endregion Debug Logger Generator
 
-return logging
+return M

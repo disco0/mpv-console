@@ -1,8 +1,7 @@
-local M =
-{
-    _NAME = 'default-macros',
-    _DESCRIPTION = 'Default macro definition factory for console.lua'
-}
+local M = setmetatable({ }, {
+_NAME = 'default-macros',
+_DESCRIPTION = 'Default macro definition factory for console.lua'
+})
 
 M.config_file =
 {

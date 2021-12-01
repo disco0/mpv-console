@@ -1,4 +1,6 @@
-local M = { }
+local M = setmetatable({ }, {
+_NAME = 'console-ass-format'
+})
 
 --region Localize
 

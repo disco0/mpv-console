@@ -1,12 +1,14 @@
-local module = { }
+local module = setmetatable({ }, {
+_NAME = 'console-ass-color'
+})
 
 -- @TODO Check out R/G/B value to 24bit color operations (as well as the rest of
 --       this post https://ebens.me/post/simulate-bitwise-shift-operators-in-lua
-local function rgb2hex(r, g, b) 
-    return (r * 2 ^ 16) 
-         + (b * 2 ^ 08) 
+local function rgb2hex(r, g, b)
+    return (r * 2 ^ 16)
+         + (b * 2 ^ 08)
          + (g * 2 ^ 01)
-end 
+end
 
 
 --region Util

@@ -1,14 +1,9 @@
---region Imports
+local M = setmetatable({ }, {
+_NAME = 'console-constants',
+_DESCRIPTION = 'Contains constants and default enumeration functions for console.lua'
+})
 
 local mp = require('mp')
-
---endregion Imports
-
-local M =
-{
-    _NAME = 'console-constants',
-    _DESCRIPTION = 'Contains constants and default enumeration functions for console.lua'
-}
 
 --region Platform Detection
 

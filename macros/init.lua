@@ -1,20 +1,12 @@
----@alias Macros table<string, string>
-
--- @FIXME Clean this whole folder up—tried unteasing the parts here without any
---        crazy rewites but didnt' workout
-
-local M =
-{
-    _NAME = 'console-macros',
-    _DESCRIPTION = 'Entry module for console macros system.',
-    _VERSION = '0.0.1'
-}
+local M = setmetatable({ }, {
+_NAME = 'console-macros',
+_DESCRIPTION = 'Entry module for console macros system.',
+_VERSION = '0.0.1'
+})
 
 -- @TODO: Across all subscripts migrate live macros definition table from global macros table
 --        (`_G.macros`).
 -- @TODO: Return to implicit global mp?
-
---region Imports
 
 local mp = require('mp')
 local msg = require('log-ext').msg.extend('macros')
@@ -24,7 +16,7 @@ local is = require('util.guard').is
 local defaults = require('macros.defaults')
 local instance = require('macros.instance')
 
---endregion Imports
+---@alias Macros table<string, string>
 
 local log = msg.extend('init')
 ---

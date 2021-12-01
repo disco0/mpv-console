@@ -1,24 +1,16 @@
-local clipboard =
-{
-    _VERSION     = '0.1',
-    _DESCRIPTION = 'Clipboard wrapper for mpv scripts',
-    -- @TODO
-    _URL         = 'https://github.com/disco0/mpv-clip.lua',
-    _LICENSE     = 'MIT'
-}
+local clipboard = setmetatable({ }, {
+_VERSION     = '0.1',
+_DESCRIPTION = 'Clipboard wrapper for mpv scripts'
+})
 
 --region Environment
 
 local unpack = table.unpack or unpack
 
-local mp = require('mp')
--- local utils = require('mp.utils')
+local mp         = require('mp')
 local subprocess = require('mp.utils').subprocess
-
----@type string
-local platform = require('constants').platform
-local logging = require('log-ext')
-local msg = logging.msg
+local platform   = require('constants').platform
+local msg        = require('log-ext').msg
 
 --endregion Environment
 
@@ -45,7 +37,8 @@ win_clip =
     command =
     {
         pwsh       = '. { Get-Clipboard -ErrorAction SilentlyContinue -Raw }',
-        powershell = ([[& {
+        powershell = [[
+        & {
             Trap {
                 Write-Error -ErrorRecord $_
                 Exit 1
@@ -62,7 +55,7 @@ win_clip =
             $clip = $clip -Replace "`r",""
             $u8clip = [System.Text.Encoding]::UTF8.GetBytes($clip)
             [Console]::OpenStandardOutput().Write($u8clip, 0, $u8clip.Length)
-        }]]):gsub('^        ', '')
+        }]]
     },
 
     ---@return WindowsClipboardBin
@@ -92,7 +85,6 @@ win_clip =
             local resolved_comand = win_clip.command[resolved_bin]
             if type(resolved_bin) == 'string' and resolved_command then
                 return {
-
                     args =
                     {
                         resolved_bin,
@@ -103,7 +95,6 @@ win_clip =
                     },
 
                     playback_only = false
-
                 }
             end
         end)(win_clip.get_bin())
@@ -198,8 +189,8 @@ local function set_clipboard(text)
     log.warn('Clipboard setter function unimplemented.')
 end
 
----@class Clipboard
 --- Read clipboard using platform-specfic scripts.
+---@class Clipboard
 ---@field public read fun(clip?: boolean, returnErrorOnFailure?: boolean): string
 ---@field public set  fun(text: string): nil @ _*Unimplemented*_
 M.clipboard =
